@@ -60,7 +60,6 @@ def get_train_fn(cfg, checkpoint_path, restore_checkpoint_path):
             "store_checkpoint",
             "wandb_id",
             "hard_resets",
-            "nonepisodic",
             "action_delay",
         ]
     }

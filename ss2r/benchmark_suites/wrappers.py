@@ -174,63 +174,6 @@ class CostEpisodeWrapper(brax_training.EpisodeWrapper):
         return state.replace(done=done)
 
 
-class NonEpisodicWrapper(Wrapper):
-    def __init__(self, env: Env, action_repeat: int):
-        super().__init__(env)
-        self.action_repeat = action_repeat
-
-    def reset(self, rng):
-        state = self.env.reset(rng)
-        state.info["steps"] = jp.zeros(rng.shape[:-1])
-        state.info["average_reward"] = jp.zeros(rng.shape[:-1])
-        state.info["died_count"] = jp.zeros(rng.shape[:-1])
-        state.info["prev_done"] = jp.zeros(rng.shape[:-1])
-        metrics = {
-            "average_reward": state.info["average_reward"],
-            "died_count": state.info["died_count"],
-            "total_steps": state.info["steps"],
-        }
-        state.info["truncation"] = jp.zeros(rng.shape[:-1])
-        state.metrics.update(metrics)
-        return state
-
-    def step(self, state: State, action: jax.Array) -> State:
-        def f(state, _):
-            nstate = self.env.step(state, action)
-            maybe_cost = nstate.info.get("cost", None)
-            maybe_eval_reward = nstate.info.get("eval_reward", None)
-            return nstate, (nstate.reward, maybe_cost, maybe_eval_reward)
-
-        state, (rewards, maybe_costs, maybe_eval_rewards) = jax.lax.scan(
-            f, state, (), self.action_repeat
-        )
-        dead = state.info["prev_done"]
-        sum_rewards = jp.sum(rewards, axis=0) * (1.0 - dead.astype(jp.float32))
-        state = state.replace(reward=sum_rewards)
-        if maybe_costs is not None:
-            state.info["cost"] = jp.sum(maybe_costs, axis=0) * (
-                1.0 - dead.astype(jp.float32)
-            )
-        if maybe_eval_rewards is not None:
-            state.info["eval_reward"] = jp.sum(maybe_eval_rewards, axis=0)
-        steps = state.info["steps"] + self.action_repeat
-        steps = steps * (1.0 - dead.astype(jp.float32))
-        sum_rewards /= self.action_repeat
-        average_reward = (
-            state.info["average_reward"]
-            + (sum_rewards - state.info["average_reward"]) * self.action_repeat / steps
-        )
-        average_reward = average_reward * (1.0 - dead.astype(jp.float32))
-        state.info["steps"] = steps
-        state.info["average_reward"] = average_reward
-        state.info["died_count"] = state.info["died_count"] + dead.astype(jp.float32)
-        state.info["prev_done"] = state.done
-        state.metrics["average_reward"] = average_reward
-        state.metrics["died_count"] = state.info["died_count"]
-        state.metrics["total_steps"] = steps
-        return state
-
-
 def wrap(
     env: Env,
     episode_length: int = 1000,
@@ -282,6 +225,7 @@ class SPiDR(Wrapper):
     def __init__(self, env, randomzation_fn, num_perturbed_envs, lambda_, alpha):
         super().__init__(env)
         if hasattr(env, "sys"):
+            print("env sys??--------------------------")
             self.perturbed_env = DomainRandomizationVmapWrapper(
                 env, randomzation_fn, augment_state=False
             )
@@ -335,7 +279,7 @@ class SPiDR(Wrapper):
             x = jp.asarray(x)
             return jp.tile(x, (self.num_perturbed_envs,) + (1,) * x.ndim)
 
-        return jax.tree_map(tile, tree)
+        return jax.tree_util.tree_map(tile, tree)
 
 
 class BraxDomainRandomizationVmapWrapper(DomainRandomizationVmapBase):

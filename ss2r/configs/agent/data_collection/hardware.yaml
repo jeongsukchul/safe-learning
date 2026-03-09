@@ -1,3 +1,0 @@
-name: hardware
-address: "tcp://localhost:5555"
-wait_time_sec: 180

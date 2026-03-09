@@ -39,10 +39,9 @@ import ss2r.algorithms.sac.losses as sac_losses
 import ss2r.algorithms.sac.networks as sac_networks
 from ss2r.algorithms.penalizers import Penalizer
 from ss2r.algorithms.sac import gradients
-from ss2r.algorithms.sac.data import collect_single_step
+from ss2r.algorithms.sac.data import collect_single_step, collect_adv_single_step
 from ss2r.algorithms.sac.pytree_uniform_sampling_queue import PytreeReplayBufferState
 from ss2r.algorithms.sac.q_transforms import QTransformation, SACBase, SACCost, UCBCost
-from ss2r.algorithms.sac.rae import RAEReplayBufferState
 from ss2r.algorithms.sac.types import (
     CollectDataFn,
     Metrics,
@@ -52,7 +51,7 @@ from ss2r.algorithms.sac.types import (
     float16,
     float32,
 )
-from ss2r.rl.evaluation import ConstraintsEvaluator
+from ss2r.rl.evaluation import ConstraintsAdvEvaluator, ConstraintsEvaluator
 from ss2r.rl.utils import (
     dequantize_images,
     quantize_images,
@@ -62,9 +61,9 @@ from ss2r.rl.utils import (
 
 
 def _random_translate_pixels(x, rng):
-    x = jax.tree_map(lambda x: x[:, None], x)
+    x = jax.tree_util.tree_map(lambda x: x[:, None], x)
     y = batch_random_translate_pixels(x, rng)
-    return jax.tree_map(lambda y: y[:, 0], y)
+    return jax.tree_util.tree_map(lambda y: y[:, 0], y)
 
 
 def update_lr_schedule_count(opt_state, new_count):
@@ -151,7 +150,7 @@ def train(
     num_eval_envs: int = 128,
     num_eval_episodes: int = 10,
     wrap_env_fn: Optional[Callable[[Any], Any]] = None,
-    get_experience_fn: CollectDataFn = collect_single_step,
+    get_experience_fn = collect_adv_single_step, #: CollectDataFn = collect_single_step,
     learning_rate: float = 1e-4,
     critic_learning_rate: float = 1e-4,
     cost_critic_learning_rate: float = 1e-4,
@@ -203,6 +202,7 @@ def train(
     entropy_bonus: bool = True,
     augment_pixels: bool = False,
     load_buffer: bool = False,
+    task_cfg = None,
 ):
     if min_replay_size >= num_timesteps:
         raise ValueError(
@@ -223,10 +223,10 @@ def train(
     env_steps_per_experience_call = env_steps_per_actor_step
     # equals to ceil(min_replay_size / env_steps_per_actor_step)
     num_prefill_experience_call = -(-min_replay_size // num_envs)
-    if get_experience_fn != collect_single_step:
-        # Using episodic or hardware (which is episodic)
-        env_steps_per_experience_call *= episode_length
-        num_prefill_experience_call = -(-num_prefill_experience_call // episode_length)
+    # if get_experience_fn != collect_single_step:
+    #     # Using episodic or hardware (which is episodic)
+    #     env_steps_per_experience_call *= episode_length
+    #     num_prefill_experience_call = -(-num_prefill_experience_call // episode_length)
     num_prefill_env_steps = num_prefill_experience_call * env_steps_per_experience_call
     assert num_timesteps - num_prefill_env_steps >= 0
     num_evals_after_init = max(num_evals - 1, 1)
@@ -239,8 +239,12 @@ def train(
         // (num_evals_after_init * env_steps_per_experience_call)
     )
     env = environment
-    if wrap_env_fn is not None:
-        env = wrap_env_fn(env)
+    keys = list(task_cfg.train_params.keys())  # or your own fixed order
+    bounds = jnp.array([task_cfg.train_params[k] for k in keys])
+    train_low, train_high = bounds[:,0], bounds[:,1]
+    keys = list(task_cfg.eval_params.keys())  # or your own fixed order
+    bounds = jnp.array([task_cfg.eval_params[k] for k in keys])
+    eval_low, eval_high = bounds[:,0], bounds[:,1]
     rng = jax.random.PRNGKey(seed)
     obs_size = env.observation_size
     if isinstance(obs_size, Mapping):
@@ -369,12 +373,7 @@ def train(
     buffer_state = replay_buffer.init(rb_key)
     if load_buffer and params[-1] is not None:
         if "data" in params[-1]:
-            if isinstance(
-                buffer_state, (PytreeReplayBufferState, RAEReplayBufferState)
-            ):
-                data = Transition(**params[-1].pop("data"))
-            else:
-                data = params[-1].pop("data")
+            data = params[-1].pop("data")
             buffer_state = buffer_state.replace(**params[-1], data=data)  # type: ignore
         else:
             buffer_state = params[-1]
@@ -502,15 +501,15 @@ def train(
         )
         should_update_actor = count % num_critic_updates_per_actor_update == 0
         update_if_needed = lambda x, y: jnp.where(should_update_actor, x, y)
-        policy_params = jax.tree_map(
+        policy_params = jax.tree_util.tree_map(
             update_if_needed, new_policy_params, training_state.policy_params
         )
-        policy_optimizer_state = jax.tree_map(
+        policy_optimizer_state = jax.tree_util.tree_map(
             update_if_needed,
             new_policy_optimizer_state,
             training_state.policy_optimizer_state,
         )
-        polyak = lambda target, new: jax.tree_map(
+        polyak = lambda target, new: jax.tree_util.tree_map(
             lambda x, y: x * (1 - tau) + y * tau, target, new
         )
         new_target_qr_params = polyak(training_state.target_qr_params, qr_params)
@@ -566,12 +565,14 @@ def train(
         key: PRNGKey,
     ) -> Tuple[TrainingState, envs.State, ReplayBufferState, PRNGKey]:
         """Runs the non-jittable experience collection step."""
-        experience_key, training_key = jax.random.split(key)
+        experience_key, training_key, dr_key = jax.random.split(key,3)
+        dynamics_params = jax.random.uniform(key=dr_key, shape=(num_envs//jax.process_count(),len(train_low)), minval=train_low, maxval=train_high)
         normalizer_params, env_state, buffer_state = get_experience_fn(
             env,
             make_policy,
             training_state.policy_params,
             training_state.normalizer_params,
+            dynamics_params,
             replay_buffer,
             env_state,
             buffer_state,
@@ -613,8 +614,6 @@ def train(
         )
         training_metrics |= env_state.metrics
         training_metrics["buffer_current_size"] = replay_buffer.size(buffer_state)
-        if isinstance(buffer_state, RAEReplayBufferState):
-            training_metrics["rae_mixing"] = replay_buffer.mix(buffer_state.step)
         return training_state, env_state, buffer_state, training_metrics
 
     def prefill_replay_buffer(
@@ -626,12 +625,14 @@ def train(
         def f(carry, unused):
             del unused
             training_state, env_state, buffer_state, key = carry
-            key, new_key = jax.random.split(key)
+            key, new_key, dr_key = jax.random.split(key,3)
+            dynamics_params = jax.random.uniform(key=dr_key, shape=(num_envs//jax.process_count(),len(train_low)), minval=train_low, maxval=train_high)
             new_normalizer_params, env_state, buffer_state = get_experience_fn(
                 env,
                 make_policy,
                 training_state.policy_params,
                 training_state.normalizer_params,
+                dynamics_params,
                 replay_buffer,
                 env_state,
                 buffer_state,
@@ -713,7 +714,7 @@ def train(
 
     if not eval_env:
         eval_env = environment
-    evaluator = ConstraintsEvaluator(
+    evaluator = ConstraintsAdvEvaluator(
         eval_env,
         functools.partial(make_policy, deterministic=deterministic_eval),
         num_eval_envs=num_eval_envs,
@@ -727,8 +728,11 @@ def train(
     # Run initial eval
     metrics = {}
     if num_evals > 1:
+        dynamics_params_grid = jax.random.uniform(eval_key, shape=(num_eval_envs, \
+                                    len(train_low)), minval=train_low, maxval=train_high)
         metrics = evaluator.run_evaluation(
             (training_state.normalizer_params, training_state.policy_params),
+            dynamics_params=dynamics_params_grid,
             training_metrics={},
         )
         logging.info(metrics)
@@ -780,17 +784,18 @@ def train(
                 training_state.qc_optimizer_state,
             )
             if store_buffer:
-                if isinstance(buffer_state, RAEReplayBufferState):
-                    params += (buffer_state.online_state,)
-                else:
-                    params += (buffer_state,)
+                params += (buffer_state,)
             dummy_ckpt_config = config_dict.ConfigDict()
+            dummy_ckpt_config.network_factory_kwargs = {}
             checkpoint.save(checkpoint_logdir, current_step, params, dummy_ckpt_config)
 
         # Run evals.
+        dynamics_params_grid = jax.random.uniform(eval_key, shape=(num_eval_envs, \
+                                    len(train_low)), minval=train_low, maxval=train_high)
         metrics = evaluator.run_evaluation(
             (training_state.normalizer_params, training_state.policy_params),
-            training_metrics,
+            dynamics_params=dynamics_params_grid,
+            training_metrics=training_metrics,
         )
         logging.info(metrics)
         progress_fn(current_step, metrics)
@@ -810,9 +815,6 @@ def train(
         training_state.qc_optimizer_state,
     )
     if store_buffer:
-        if isinstance(buffer_state, RAEReplayBufferState):
-            params += (buffer_state.online_state,)
-        else:
-            params += (buffer_state,)
+        params += (buffer_state,)
     logging.info("total steps: %s", total_steps)
     return make_policy, params, metrics

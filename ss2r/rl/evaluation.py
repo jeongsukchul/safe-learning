@@ -1,5 +1,5 @@
 import time
-from typing import Callable
+from typing import Any, Callable, Dict, NamedTuple, Sequence
 
 import jax
 import jax.numpy as jnp
@@ -7,9 +7,8 @@ import numpy as np
 from brax.envs.base import Env, State
 from brax.envs.wrappers.training import EvalMetrics, EvalWrapper
 from brax.training.acting import Evaluator, generate_unroll
-from brax.training.types import Metrics, Policy, PolicyParams, PRNGKey
+from brax.training.types import Metrics, Policy, PolicyParams, PRNGKey, Transition
 
-from ss2r.algorithms.mbpo.data import generate_safe_unroll
 
 
 class ConstraintEvalWrapper(EvalWrapper):
@@ -57,7 +56,52 @@ class ConstraintEvalWrapper(EvalWrapper):
         )
         nstate.info["eval_metrics"] = eval_metrics
         return nstate
+class ConstraintAdvEvalWrapper(EvalWrapper):
+    def reset(self, rng: jax.Array) -> State:
+        reset_state = self.env.reset(rng)
+        reset_state.metrics["reward"] = reset_state.reward
+        reset_state.metrics["cost"] = reset_state.info.get(
+            "cost", jnp.zeros_like(reset_state.reward)
+        )
+        eval_metrics = EvalMetrics(
+            episode_metrics=jax.tree_util.tree_map(jnp.zeros_like, reset_state.metrics),
+            active_episodes=jnp.ones_like(reset_state.reward),
+            episode_steps=jnp.zeros_like(reset_state.reward),
+        )
+        reset_state.info["eval_metrics"] = eval_metrics
+        return reset_state
 
+    def step(self, state: State, action: jax.Array, params) -> State:
+        state_metrics = state.info["eval_metrics"]
+        if not isinstance(state_metrics, EvalMetrics):
+            raise ValueError(f"Incorrect type for state_metrics: {type(state_metrics)}")
+        del state.info["eval_metrics"]
+        nstate = self.env.step(state, action, params)
+        if "eval_reward" in nstate.info:
+            reward = nstate.info["eval_reward"]
+        else:
+            reward = nstate.reward
+        nstate.metrics["reward"] = reward
+        print("n state info cost", nstate.info['cost'])
+        nstate.metrics["cost"] = nstate.info.get("cost", jnp.zeros_like(nstate.reward))
+        episode_steps = jnp.where(
+            state_metrics.active_episodes,
+            nstate.info.get("steps", jnp.zeros_like(state_metrics.episode_steps)),
+            state_metrics.episode_steps,
+        )
+        episode_metrics = jax.tree_util.tree_map(
+            lambda a, b: a + b * state_metrics.active_episodes,
+            state_metrics.episode_metrics,
+            nstate.metrics,
+        )
+        active_episodes = state_metrics.active_episodes * (1 - nstate.done)
+        eval_metrics = EvalMetrics(
+            episode_metrics=episode_metrics,
+            active_episodes=active_episodes,
+            episode_steps=episode_steps,
+        )
+        nstate.info["eval_metrics"] = eval_metrics
+        return nstate
 
 class InterventionConstraintEvalWrapper(EvalWrapper):
     def reset(self, rng: jax.Array) -> State:
@@ -152,6 +196,7 @@ class ConstraintsEvaluator(Evaluator):
         def generate_eval_unroll(policy_params: PolicyParams, key: PRNGKey) -> State:  # type: ignore
             reset_keys = jax.random.split(key, num_eval_envs)
             eval_first_state = eval_env.reset(reset_keys)
+            
             return generate_unroll(
                 eval_env,
                 eval_first_state,
@@ -206,9 +251,74 @@ class ConstraintsEvaluator(Evaluator):
             **metrics,
         }
         return metrics
+class TransitionwithParams(NamedTuple):
+    """Transition with additional dynamics parameters."""
+    observation: jax.Array
+    dynamics_params: jax.Array
+    action: jax.Array
+    reward: jax.Array
+    discount: jax.Array
+    next_observation: jax.Array
+    extras: Dict[str, Any] = {}
 
 
-class InterventionConstraintsEvaluator(ConstraintsEvaluator):
+def adv_step(
+    env: Env,
+    env_state: State,
+    dynamics_params: jnp.ndarray,
+    policy: Policy,
+    key: PRNGKey,
+    extra_fields: Sequence[str] = (),
+    ):
+    
+    actions, policy_extras = policy(env_state.obs, key)
+    nstate = env.step(env_state, actions, dynamics_params)
+    state_extras = {x: nstate.info[x] for x in extra_fields}
+    return nstate, Transition(  # pytype: disable=wrong-arg-types  # jax-ndarray
+        observation=env_state.obs,
+        # dynamics_params=dynamics_params,
+        action=actions,
+        reward=nstate.reward,
+        discount=1 - nstate.done,
+        next_observation= nstate.obs,
+        extras={'policy_extras': policy_extras, 'state_extras': state_extras},
+        )
+def generate_adv_unroll(
+    env: Env,
+    env_state: State,
+    dynamics_params :jnp.ndarray,
+    policy: Policy,
+    key: PRNGKey,
+    unroll_length: int,
+    extra_fields: Sequence[str] = (),
+    non_stationary: bool=False,
+):
+    """Collect trajectories of given unroll_length."""
+    @jax.jit
+    def f(carry, unused_t):
+        state, current_key = carry
+        current_key, next_key = jax.random.split(current_key)
+        if non_stationary:
+            nstate, transition = adv_step(
+                env, state, unused_t, policy, current_key, extra_fields=extra_fields
+            )
+        else:
+            nstate, transition = adv_step(
+                env, state, dynamics_params, policy, current_key, extra_fields=extra_fields
+            )
+        return (nstate, next_key), transition
+
+    if non_stationary:
+        (final_state, _), data = jax.lax.scan(
+            f, (env_state, key), (dynamics_params), length=unroll_length
+        )
+    else:
+        (final_state, _), data = jax.lax.scan(
+            f, (env_state, key), (), length=unroll_length
+        )
+    return final_state, data
+
+class ConstraintsAdvEvaluator(Evaluator):
     def __init__(
         self,
         eval_env: Env,
@@ -219,32 +329,44 @@ class InterventionConstraintsEvaluator(ConstraintsEvaluator):
         key: jax.Array,
         budget: float,
         num_episodes: int = 10,
+        non_stationary = False,
     ):
         self._key = key
         self._eval_walltime = 0.0
-        eval_env = InterventionConstraintEvalWrapper(eval_env)
+        eval_env = ConstraintAdvEvalWrapper(eval_env)
         self.budget = budget
         self.num_episodes = num_episodes
 
-        def generate_eval_unroll(policy_params: PolicyParams, key: PRNGKey) -> State:  # type: ignore
+        def generate_eval_unroll(policy_params: PolicyParams, eval_params, key: PRNGKey) -> State:  # type: ignore
             reset_keys = jax.random.split(key, num_eval_envs)
             eval_first_state = eval_env.reset(reset_keys)
-            return generate_safe_unroll(
+            return generate_adv_unroll(
                 eval_env,
                 eval_first_state,
+                eval_params,
                 eval_policy_fn(policy_params),
                 key,
                 unroll_length=episode_length // action_repeat,
+                non_stationary=non_stationary,
             )[0]
-
-        self._generate_eval_unroll = jax.jit(
-            jax.vmap(generate_eval_unroll, in_axes=(None, 0))
-        )
+            # return generate_unroll(
+            #     eval_env,
+            #     eval_first_state,
+            #     eval_policy_fn(policy_params),
+            #     key,
+            #     unroll_length=episode_length // action_repeat,
+            # )[0]
+        
+        # self._generate_eval_unroll = jax.jit(
+        #     jax.vmap(generate_eval_unroll, in_axes=(None, None, 0))
+        # )
+        self._generate_eval_unroll = jax.jit(generate_eval_unroll)
         self._steps_per_unroll = episode_length * num_eval_envs * num_episodes
 
     def run_evaluation(
         self,
         policy_params: PolicyParams,
+        dynamics_params : jnp.ndarray,
         training_metrics: Metrics,
         aggregate_episodes: bool = True,
         prefix: str = "eval",
@@ -254,51 +376,20 @@ class InterventionConstraintsEvaluator(ConstraintsEvaluator):
         unroll_key = jax.random.split(unroll_key, self.num_episodes)
 
         t = time.time()
-        eval_state = self._generate_eval_unroll(policy_params, unroll_key)
+        def f(carry, key):
+            eval_state = self._generate_eval_unroll(policy_params, dynamics_params, key)
+            # eval_metrics = eval_state.info['eval_metrics']
+            return carry, eval_state
+        _, eval_state = jax.lax.scan(f, None, unroll_key)
+        # eval_state = self._generate_eval_unroll(policy_params, dynamics_params, unroll_key)
         constraint = eval_state.info["eval_metrics"].episode_metrics["cost"].mean(0)
-        intervention = (
-            eval_state.info["eval_metrics"].episode_metrics["intervention"].mean(0)
-        )
-        policy_distance = (
-            eval_state.info["eval_metrics"]
-            .episode_metrics["max_policy_distance"]
-            .mean(0)
-        )
-        safety_gap = (
-            eval_state.info["eval_metrics"].episode_metrics["max_safety_gap"].mean(0)
-        )
-        expected_total_cost = (
-            eval_state.info["eval_metrics"]
-            .episode_metrics["max_expected_total_cost"]
-            .mean(0)
-        )
-        cumulative_cost = (
-            eval_state.info["eval_metrics"]
-            .episode_metrics["max_cumulative_cost"]
-            .mean(0)
-        )
-        q_c = eval_state.info["eval_metrics"].episode_metrics["max_q_c"].mean(0)
-        safe = np.where(constraint < self.budget, 1.0, 0.0)
         eval_state.info["eval_metrics"].episode_metrics["cost"] = constraint
-        eval_state.info["eval_metrics"].episode_metrics["intervention"] = intervention
-        eval_state.info["eval_metrics"].episode_metrics[
-            "max_policy_distance"
-        ] = policy_distance
-        eval_state.info["eval_metrics"].episode_metrics["max_safety_gap"] = safety_gap
-        eval_state.info["eval_metrics"].episode_metrics[
-            "max_expected_total_cost"
-        ] = expected_total_cost
-        eval_state.info["eval_metrics"].episode_metrics[
-            "max_cumulative_cost"
-        ] = cumulative_cost
-        eval_state.info["eval_metrics"].episode_metrics["max_q_c"] = q_c
+        safe = np.where(constraint < self.budget, 1.0, 0.0)
         eval_state.info["eval_metrics"].episode_metrics["safe"] = safe
         eval_metrics = eval_state.info["eval_metrics"]
         eval_metrics.active_episodes.block_until_ready()
-
         epoch_eval_time = time.time() - t
         metrics = {}
-
         for fn in [np.mean, np.std]:
             suffix = "_std" if fn == np.std else ""
             metrics.update(
@@ -309,7 +400,6 @@ class InterventionConstraintsEvaluator(ConstraintsEvaluator):
                     for name, value in eval_metrics.episode_metrics.items()
                 }
             )
-
         metrics[f"{prefix}/avg_episode_length"] = np.mean(eval_metrics.episode_steps)
         metrics[f"{prefix}/epoch_eval_time"] = epoch_eval_time
         metrics[f"{prefix}/sps"] = self._steps_per_unroll / epoch_eval_time
@@ -320,3 +410,4 @@ class InterventionConstraintsEvaluator(ConstraintsEvaluator):
             **metrics,
         }
         return metrics
+

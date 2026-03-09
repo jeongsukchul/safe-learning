@@ -11,7 +11,6 @@ from ss2r.algorithms.sac.q_transforms import (
     get_cost_q_transform,
     get_reward_q_transform,
 )
-from ss2r.algorithms.sac.rae import RAEReplayBuffer
 
 
 def _get_replay_buffer(cfg):
@@ -19,14 +18,6 @@ def _get_replay_buffer(cfg):
         return UniformSamplingQueue
     elif cfg.agent.replay_buffer.name == "pytree":
         return PytreeUniformSamplingQueue
-    elif cfg.agent.replay_buffer.name == "rae":
-        return functools.partial(
-            RAEReplayBuffer,
-            wandb_ids=cfg.agent.replay_buffer.wandb_ids,
-            wandb_entity=cfg.wandb.entity,
-            mix=cfg.agent.replay_buffer.mix,
-        )
-
 
 def get_train_fn(cfg, checkpoint_path, restore_checkpoint_path):
     import jax.nn as jnn
@@ -48,7 +39,6 @@ def get_train_fn(cfg, checkpoint_path, restore_checkpoint_path):
             "policy_privileged",
             "wandb_id",
             "hard_resets",
-            "nonepisodic",
             "action_delay",
         ]
     }

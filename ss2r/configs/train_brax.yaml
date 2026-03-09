@@ -45,14 +45,13 @@ training:
   action_repeat: 1
   render: true
   num_timesteps: 1000000
-  value_privileged: false
+  value_privileged: true
   policy_privileged: false
   train_domain_randomization: true
   eval_domain_randomization: true
   store_checkpoint: true
   wandb_id: null
   hard_resets: false
-  nonepisodic: false
   action_delay:
     enable: false
     max_delay: 0
