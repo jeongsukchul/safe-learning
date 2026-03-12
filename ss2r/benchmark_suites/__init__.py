@@ -142,6 +142,7 @@ def get_wrap_env_fn(cfg):
 
 def make(cfg, train_wrap_env_fn=lambda env: env, eval_wrap_env_fn=lambda env: env):
     domain_name = get_domain_name(cfg)
+    print("cfg", cfg)
     print("domain name", domain_name)
     if domain_name == "brax":
         return make_brax_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn)
