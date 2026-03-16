@@ -165,14 +165,18 @@ def make(cfg, train_wrap_env_fn=lambda env: env, eval_wrap_env_fn=lambda env: en
 
 
 def prepare_randomization_fn(key, num_envs, cfg, task_name):
-    randomize_fn = functools.partial(randomization_fns[task_name], cfg=cfg)
-    return randomize_fn
-    # randomize_fn = lambda sys, rng: randomization_fns[task_name](sys, rng, cfg)
-    # v_randomization_fn = functools.partial(
-        # randomize_fn, rng=jax.random.split(key, num_envs)
-    # )
-    # vf_randomization_fn = lambda sys: v_randomization_fn(sys)  # type: ignore
-    # return vf_randomization_fn
+    def randomize_fn(sys, rng):
+        return randomization_fns[task_name](cfg=cfg, sys=sys, rng=rng)
+
+    def vf_randomization_fn(sys):
+        rngs = jax.random.split(key, num_envs)
+        randomized_models = jax.vmap(
+            lambda rng: randomize_fn(sys, rng)[0], in_axes=0
+        )(rngs)
+        in_axes = jax.tree_util.tree_map(lambda _: 0, randomized_models)
+        return randomized_models, in_axes
+
+    return vf_randomization_fn
 
 
 def make_rccar_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn, use_vision=False):

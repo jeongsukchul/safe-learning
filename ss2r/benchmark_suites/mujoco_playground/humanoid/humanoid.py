@@ -35,18 +35,18 @@ def domain_randomization(cfg, sys, params=None, rng: jax.Array = None):
         dr_low = jnp.array(
             [
                 cfg.friction[0],
-                cfg.gear_hip_x[0],
-                cfg.gear_hip_y[0],
-                cfg.gear_hip_z[0],
+                cfg.gear_hip.x[0],
+                cfg.gear_hip.y[0],
+                cfg.gear_hip.z[0],
                 cfg.gear_knee[0],
             ]
         )
         dr_high = jnp.array(
             [
                 cfg.friction[1],
-                cfg.gear_hip_x[1],
-                cfg.gear_hip_y[1],
-                cfg.gear_hip_z[1],
+                cfg.gear_hip.x[1],
+                cfg.gear_hip.y[1],
+                cfg.gear_hip.z[1],
                 cfg.gear_knee[1],
             ]
         )

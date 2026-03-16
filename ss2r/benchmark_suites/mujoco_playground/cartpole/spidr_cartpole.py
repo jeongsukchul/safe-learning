@@ -6,7 +6,7 @@ from brax.envs.base import Wrapper
 from ml_collections import config_dict
 from mujoco_playground._src.dm_control_suite import cartpole
 
-from ss2r.benchmark_suites.wrappers import BraxDomainRandomizationVmapWrapper, _get_obs
+from ss2r.benchmark_suites.wrappers import DomainRandomizationVmap, _get_obs
 
 
 class VisionSPiDRCartpole(Wrapper):
@@ -21,7 +21,7 @@ class VisionSPiDRCartpole(Wrapper):
         super().__init__(env)
         config["vision"] = False
         base_cartpole = cartpole.Balance(True, False, config, config_overrides)
-        self.perturbed_env = BraxDomainRandomizationVmapWrapper(
+        self.perturbed_env = DomainRandomizationVmap(
             base_cartpole, randomization_fn, augment_state=False
         )
         self.num_perturbed_envs = 8

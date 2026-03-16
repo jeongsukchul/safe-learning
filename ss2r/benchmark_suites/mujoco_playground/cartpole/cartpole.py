@@ -137,7 +137,6 @@ class ConstraintWrapper(Wrapper):
         slider_pos = state.data.qpos[self.env._slider_qposadr]
         cost = (jnp.abs(slider_pos) >= self.slider_position_bound).astype(jnp.float32)
         nstate.info["cost"] = cost
-        print("cost step ", cost)
         return nstate
 
 

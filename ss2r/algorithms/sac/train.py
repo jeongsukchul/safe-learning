@@ -203,6 +203,7 @@ def train(
     augment_pixels: bool = False,
     load_buffer: bool = False,
     task_cfg = None,
+    nonstationary: bool = False
 ):
     if min_replay_size >= num_timesteps:
         raise ValueError(
@@ -567,6 +568,9 @@ def train(
         """Runs the non-jittable experience collection step."""
         experience_key, training_key, dr_key = jax.random.split(key,3)
         dynamics_params = jax.random.uniform(key=dr_key, shape=(num_envs//jax.process_count(),len(train_low)), minval=train_low, maxval=train_high)
+        if not nonstationary:
+            print("staitonary!")
+            dynamics_params = env_state.info["dr_params"] * (1 - env_state.done[..., None]) + dynamics_params * env_state.done[..., None]
         normalizer_params, env_state, buffer_state = get_experience_fn(
             env,
             make_policy,

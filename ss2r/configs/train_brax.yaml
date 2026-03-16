@@ -55,3 +55,4 @@ training:
   action_delay:
     enable: false
     max_delay: 0
+  nonstationary: false

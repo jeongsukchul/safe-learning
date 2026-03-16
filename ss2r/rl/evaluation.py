@@ -82,7 +82,6 @@ class ConstraintAdvEvalWrapper(EvalWrapper):
         else:
             reward = nstate.reward
         nstate.metrics["reward"] = reward
-        print("n state info cost", nstate.info['cost'])
         nstate.metrics["cost"] = nstate.info.get("cost", jnp.zeros_like(nstate.reward))
         episode_steps = jnp.where(
             state_metrics.active_episodes,

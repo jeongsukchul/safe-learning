@@ -6,110 +6,61 @@ from brax.envs.base import Env, State, Wrapper
 from brax.envs.wrappers import training as brax_training
 from jax import numpy as jp
 from mujoco_playground import State as MjxState
+import contextlib
 
-
-class DomainRandomizationVmapBase(Wrapper):
+class DomainRandomizationVmap(Wrapper):
     """Base class for domain randomization wrappers."""
 
     def __init__(self, env, randomization_fn, *, augment_state=True):
         super().__init__(env)
         self.augment_state = augment_state
-        (
-            self._randomized_models,
-            self._in_axes,
-            self.domain_parameters,
-        ) = self._init_randomization(randomization_fn)
+        self._randomized_models, self._in_axes = self._init_randomization(randomization_fn)
         dummy = self.env.reset(jax.random.PRNGKey(0))
         self.strip_privileged_state = isinstance(dummy.obs, jax.Array)
 
     def _init_randomization(self, randomization_fn):
         """To be implemented by subclasses to handle model-specific randomization."""
-        raise NotImplementedError
+        return randomization_fn(self.mjx_model)
 
-    def _env_fn(self, model):
-        """To be implemented by subclasses to return an environment with the given model."""
-        raise NotImplementedError
+    @contextlib.contextmanager
+    def v_env_fn(self, model):
+        """Temporarily swap the underlying model."""
+        base = self.env.unwrapped
+        old_model = base._mjx_model
+        try:
+            base._mjx_model = model
+            yield self.env
+        finally:
+            base._mjx_model = old_model
 
     def reset(self, rng: jax.Array):
         def reset_fn(model, rng):
-            env = self._env_fn(model)
-            return env.reset(rng)
+            with self.v_env_fn(model) as v_env:
+                return v_env.reset(rng)
 
         state = jax.vmap(reset_fn, in_axes=[self._in_axes, 0])(
             self._randomized_models, rng
         )
-        if self.augment_state:
-            state = self._add_privileged_state(state)
+        # if self.augment_state:
+        #     state = self._add_privileged_state(state)
         return state
 
     def step(self, state, action: jax.Array):
-        def step_fn(model, s, a):
-            env = self._env_fn(model)
-            return env.step(s, a)
+        def step(mjx_model, s, a):
+            with self.v_env_fn(mjx_model) as v_env:
+                return v_env.step(s, a)
 
         if self.augment_state and self.strip_privileged_state:
             state = state.replace(obs=state.obs["state"])
 
-        state = jax.vmap(step_fn, in_axes=[self._in_axes, 0, 0])(
+        state = jax.vmap(step, in_axes=[self._in_axes, 0, 0])(
             self._randomized_models, state, action
         )
-        if self.augment_state:
-            state = self._add_privileged_state(state)
+        # if self.augment_state:
+        #     state = self._add_privileged_state(state)
         return state
 
-    def _add_privileged_state(self, state):
-        """Adds privileged state to the observation if augmentation is enabled."""
-        if isinstance(state.obs, jax.Array):
-            state = state.replace(
-                obs={
-                    "state": state.obs,
-                    "privileged_state": jp.concatenate(
-                        [state.obs, self.domain_parameters], -1
-                    ),
-                }
-            )
-        else:
-            state = state.replace(
-                obs={
-                    "state": state.obs["state"],
-                    "privileged_state": jp.concatenate(
-                        [state.obs["privileged_state"], self.domain_parameters], -1
-                    ),
-                }
-            )
-        return state
 
-    @property
-    def observation_size(self):
-        """Compute observation size based on the augmentation setting."""
-        if not self.augment_state:
-            return self.env.observation_size
-
-        if isinstance(self.env.observation_size, int):
-            return {
-                "state": (self.env.observation_size,),
-                "privileged_state": (
-                    self.env.observation_size + self.domain_parameters.shape[1],
-                ),
-            }
-        else:
-            return {
-                "state": (self.env.observation_size["state"],),
-                "privileged_state": (
-                    self.env.observation_size["privileged_state"]
-                    + self.domain_parameters.shape[1],
-                ),
-            }
-
-
-class DomainRandomizationVmapWrapper(DomainRandomizationVmapBase):
-    def _init_randomization(self, randomization_fn):
-        return randomization_fn(self.sys)
-
-    def _env_fn(self, model):
-        env = self.env
-        env.unwrapped.sys = model
-        return env
 
 
 class ActionDelayWrapper(Wrapper):
@@ -202,7 +153,7 @@ def wrap(
     if randomization_fn is None:
         env = brax_training.VmapWrapper(env)
     else:
-        env = DomainRandomizationVmapWrapper(
+        env = DomainRandomizationVmap(
             env, randomization_fn, augment_state=augment_state
         )
     env = CostEpisodeWrapper(env, episode_length, action_repeat)
@@ -224,17 +175,10 @@ def _get_obs(state):
 class SPiDR(Wrapper):
     def __init__(self, env, randomzation_fn, num_perturbed_envs, lambda_, alpha):
         super().__init__(env)
-        if hasattr(env, "sys"):
-            print("env sys??--------------------------")
-            self.perturbed_env = DomainRandomizationVmapWrapper(
-                env, randomzation_fn, augment_state=False
-            )
-        elif hasattr(env, "mjx_model"):
-            self.perturbed_env = BraxDomainRandomizationVmapWrapper(
-                env, randomzation_fn, augment_state=False
-            )
-        else:
-            raise ValueError("Should be either mujoco playground or brax env")
+
+        self.perturbed_env = DomainRandomizationVmap(
+            env, randomzation_fn, augment_state=False
+        )
         self.num_perturbed_envs = num_perturbed_envs
         self.lambda_ = lambda_
         self.alpha = alpha
@@ -280,16 +224,6 @@ class SPiDR(Wrapper):
             return jp.tile(x, (self.num_perturbed_envs,) + (1,) * x.ndim)
 
         return jax.tree_util.tree_map(tile, tree)
-
-
-class BraxDomainRandomizationVmapWrapper(DomainRandomizationVmapBase):
-    def _init_randomization(self, randomization_fn):
-        return randomization_fn(self.mjx_model)
-
-    def _env_fn(self, model):
-        env = self.env
-        env.unwrapped._mjx_model = model
-        return env
 
 
 class HardAutoResetWrapper(Wrapper):

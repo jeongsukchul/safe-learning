@@ -16,7 +16,7 @@ from ss2r.benchmark_suites import adv_wrapper
 def _dig(env):
     if env == env.unwrapped:
         raise ValueError("Not wrapped")
-    if isinstance(env, wrappers.BraxDomainRandomizationVmapWrapper):
+    if isinstance(env, wrappers.DomainRandomizationVmap):
         return env
     elif isinstance(env, adv_wrapper.AdVmapWrapper):
         return env.env
@@ -91,7 +91,7 @@ def wrap_for_brax_training(
     elif randomization_fn is None:
         env = brax_training.VmapWrapper(env)  # pytype: disable=wrong-arg-types
     else:
-        env = wrappers.BraxDomainRandomizationVmapWrapper(
+        env = wrappers.DomainRandomizationVmap(
             env, randomization_fn, augment_state=augment_state
         )
     env = wrappers.CostEpisodeWrapper(env, episode_length, action_repeat)

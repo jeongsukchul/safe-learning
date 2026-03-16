@@ -52,9 +52,9 @@ def domain_randomization(cfg, sys, params=None, rng: jax.Array = None):
                 cfg.torso[0],
                 cfg.friction[0],
                 cfg.damping[0],
-                cfg.gear_lift[0],
-                cfg.gear_yaw[0],
-                cfg.gear_extend[0],
+                cfg.gear.lift[0],
+                cfg.gear.yaw[0],
+                cfg.gear.extend[0],
             ]
         )
         dr_high = jp.array(
@@ -62,9 +62,9 @@ def domain_randomization(cfg, sys, params=None, rng: jax.Array = None):
                 cfg.torso[1],
                 cfg.friction[1],
                 cfg.damping[1],
-                cfg.gear_lift[1],
-                cfg.gear_yaw[1],
-                cfg.gear_extend[1],
+                cfg.gear.lift[1],
+                cfg.gear.yaw[1],
+                cfg.gear.extend[1],
             ]
         )
         dist = functools.partial(
