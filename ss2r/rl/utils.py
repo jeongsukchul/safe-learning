@@ -1,3 +1,4 @@
+import inspect
 from functools import partial
 from typing import Mapping, Union
 
@@ -15,15 +16,39 @@ def rollout(
     rng: jax.Array,
     state: State,
 ) -> tuple[State, State]:
-    def f(carry, _):
-        state, current_key = carry
-        current_key, next_key = jax.random.split(current_key)
-        action, _ = policy(state.obs, current_key)
-        nstate = env.step(
-            state,
-            action,
-        )
-        return (nstate, next_key), nstate
+    # Original code
+    # def f(carry, _):
+    #     state, current_key = carry
+    #     current_key, next_key = jax.random.split(current_key)
+    #     action, _ = policy(state.obs, current_key)
+    #     nstate = env.step(
+    #         state,
+    #         action,
+    #     )
+    #     return (nstate, next_key), nstate
+
+    # 형준, 0316 rendering시, step에서 param가 없다는 에러가 발생하여 추가한 코드
+    step_params = list(inspect.signature(env.step).parameters.keys())
+    step_takes_params = "params" in step_params
+
+    if step_takes_params:
+
+        def f(carry, _):
+            state, current_key = carry
+            current_key, next_key = jax.random.split(current_key)
+            action, _ = policy(state.obs, current_key)
+            params = state.info["dr_params"]
+            nstate = env.step(state, action, params)
+            return (nstate, next_key), nstate
+
+    else:
+
+        def f(carry, _):
+            state, current_key = carry
+            current_key, next_key = jax.random.split(current_key)
+            action, _ = policy(state.obs, current_key)
+            nstate = env.step(state, action)
+            return (nstate, next_key), nstate
 
     (final_state, _), data = jax.lax.scan(f, (state, rng), (), length=steps)
     return final_state, data

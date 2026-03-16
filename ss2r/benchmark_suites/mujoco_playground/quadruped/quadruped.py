@@ -1,5 +1,6 @@
 """Quadruped environment."""
 
+import functools
 from functools import partial
 from itertools import product
 from typing import Any, Dict, Optional, Union
@@ -40,42 +41,56 @@ actuator_names_to_ids = {
 }
 
 
-def domain_randomization(sys, rng, cfg):
-    @jax.vmap
-    def randomize(rng):
-        rng, rng_ = jax.random.split(rng)
-        friction = jax.random.uniform(
-            rng_, minval=cfg.friction[0], maxval=cfg.friction[1]
+def domain_randomization(cfg, sys, params=None, rng: jax.Array = None):
+    """
+    Humanoid/cartpole과 동일한 구조, rng만 있으면 dist로 샘플링 후 적용, params만 있으면 그대로 적용.
+    """
+    # rng 분기: [dr_low, dr_high] 구간에서 균등 샘플링하는 dist
+    if rng is not None:
+        dr_low = jp.array(
+            [
+                cfg.torso[0],
+                cfg.friction[0],
+                cfg.damping[0],
+                cfg.gear_lift[0],
+                cfg.gear_yaw[0],
+                cfg.gear_extend[0],
+            ]
         )
+        dr_high = jp.array(
+            [
+                cfg.torso[1],
+                cfg.friction[1],
+                cfg.damping[1],
+                cfg.gear_lift[1],
+                cfg.gear_yaw[1],
+                cfg.gear_extend[1],
+            ]
+        )
+        dist = functools.partial(
+            jax.random.uniform,
+            shape=(dr_low.shape[0],),
+            minval=dr_low,
+            maxval=dr_high,
+        )
+
+    def _apply_params(p):
+        """p = [torso, friction, damping, gear_lift, gear_yaw, gear_extend]"""
+        torso_val, friction_val, damping_val = p[0], p[1], p[2]
+        gear_lift, gear_yaw, gear_extend = p[3], p[4], p[5]
+
         friction_sample = sys.geom_friction.copy()
-        friction_sample = friction_sample.at[0, 0].add(friction)
-        # Toes have a default friction coefficient of 1.5
-        friction_sample = friction_sample.at[jp.asarray(_TOE_IDS), 0].add(friction)
+        friction_sample = friction_sample.at[0, 0].add(friction_val)
+        friction_sample = friction_sample.at[jp.asarray(_TOE_IDS), 0].add(friction_val)
         friction_sample = jp.clip(friction_sample, a_min=1e-3)
-        rng, rng_ = jax.random.split(rng)
-        torso_density_sample = jax.random.uniform(
-            rng_, minval=cfg.torso[0], maxval=cfg.torso[1]
-        )
-        # Default density of 1000.
-        scale = (torso_density_sample + 1000) / 1000.0
+
+        scale = (torso_val + 1000.0) / 1000.0
         mass = sys.body_mass.at[_TORSO_ID].multiply(scale)
         inertia = sys.body_inertia.at[_TORSO_ID].multiply(scale**3)
-        rng, rng_ = jax.random.split(rng)
-        damping_sample = jax.random.uniform(
-            rng_, minval=cfg.damping[0], maxval=cfg.damping[1]
-        )
+
         damping = sys.dof_damping.copy()
-        damping = damping.at[jp.asarray(_JOINTS_IDS)].add(damping_sample)
-        rng = jax.random.split(rng, 3)
-        gear_lift = jax.random.uniform(
-            rng_, minval=cfg.gear.lift[0], maxval=cfg.gear.lift[1]
-        )
-        gear_yaw = jax.random.uniform(
-            rng_, minval=cfg.gear.yaw[0], maxval=cfg.gear.yaw[1]
-        )
-        gear_extend = jax.random.uniform(
-            rng_, minval=cfg.gear.extend[0], maxval=cfg.gear.extend[1]
-        )
+        damping = damping.at[jp.asarray(_JOINTS_IDS)].add(damping_val)
+
         gear_sample = sys.actuator_gear.copy()
         for name, id_ in actuator_names_to_ids.items():
             if "yaw" in name:
@@ -87,27 +102,24 @@ def domain_randomization(sys, rng, cfg):
             else:
                 raise ValueError(f"Unknown actuator: {name}")
             gear_sample = gear_sample.at[id_, 0].multiply(update)
-        return (
-            friction_sample,
-            mass,
-            inertia,
-            damping,
-            gear_sample,
-            jp.stack(
-                [
-                    friction,
-                    torso_density_sample,
-                    damping_sample,
-                    gear_lift,
-                    gear_yaw,
-                    gear_extend,
-                ],
-                axis=-1,
-            ),
-        )
 
-    friction_sample, mass, inertia, damping, gear, samples = randomize(rng)
-    in_axes = jax.tree_util.tree_map(lambda x: None, sys)
+        return friction_sample, mass, inertia, damping, gear_sample
+
+    def shift_dynamics(params_vec):
+        return _apply_params(params_vec)
+
+    def rand_dynamics(rng_i):
+        p = dist(rng_i)
+        return _apply_params(p), p
+
+    if rng is None and params is not None:
+        friction_sample, mass, inertia, damping, gear_sample = shift_dynamics(params)
+    elif rng is not None and params is None:
+        (friction_sample, mass, inertia, damping, gear_sample), packed= rand_dynamics(rng)
+    else:
+        raise ValueError("Provide exactly one of (rng, params).")
+
+    in_axes = jax.tree_util.tree_map(lambda _: None, sys)
     in_axes = in_axes.tree_replace(
         {
             "geom_friction": 0,
@@ -123,10 +135,10 @@ def domain_randomization(sys, rng, cfg):
             "body_inertia": inertia,
             "body_mass": mass,
             "dof_damping": damping,
-            "actuator_gear": gear,
+            "actuator_gear": gear_sample,
         }
     )
-    return sys, in_axes, samples
+    return sys, in_axes
 
 
 def default_config() -> config_dict.ConfigDict:

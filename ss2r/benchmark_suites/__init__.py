@@ -32,7 +32,11 @@ from ss2r.benchmark_suites.mujoco_playground.quadruped import quadruped
 from ss2r.benchmark_suites.mujoco_playground.walker import walker
 from ss2r.benchmark_suites.rccar import rccar
 from ss2r.benchmark_suites.safety_gym import go_to_goal
-from ss2r.benchmark_suites.utils import get_domain_name, get_task_config
+from ss2r.benchmark_suites.utils import (
+    flatten_params,
+    get_domain_name,
+    get_task_config,
+)
 from ss2r.benchmark_suites.wrappers import (
     ActionDelayWrapper,
     GoToGoalObservationWrapper,
@@ -141,6 +145,10 @@ def get_wrap_env_fn(cfg):
 
 
 def make(cfg, train_wrap_env_fn=lambda env: env, eval_wrap_env_fn=lambda env: env):
+    '''
+    학습 domain에 따라 학습환경 생성
+    '''
+
     domain_name = get_domain_name(cfg)
     print("cfg", cfg)
     print("domain name", domain_name)
@@ -356,12 +364,23 @@ def _get_action_delay_max(task_cfg, training_cfg):
 
 
 def make_mujoco_playground_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn):
+    # 형준 변경 사항 : cfg의 train_params와 eval_params에 nested된 params를 평탄화 ex) 
+    from omegaconf import OmegaConf  # hydra랑 함께 사용하는 cfg 관리용 라이브러리
     from ml_collections import config_dict
     from mujoco_playground import registry
 
     from ss2r.benchmark_suites.mujoco_playground import wrap_for_brax_training
 
-    task_cfg = get_task_config(cfg)
+    task_cfg = get_task_config(cfg) # cfg 불러오기 (Omegaconf 객체)
+    task_dict = OmegaConf.to_container(task_cfg, resolve=True) # task_cfg(Omegaconf 객체) -> dict으로 변환
+    task_cfg = OmegaConf.create( # 평탄화된 params 생성 ex) humanoid의 gear_hip.x -> gear_hip_x
+        {
+            **task_dict,
+            "train_params": flatten_params(task_dict["train_params"]),
+            "eval_params": flatten_params(task_dict["eval_params"]),
+        }
+    )
+
     action_delay_max = _get_action_delay_max(task_cfg, cfg.training)
     task_params = config_dict.ConfigDict(task_cfg.task_params)
     vision = "use_vision" in cfg.agent and cfg.agent.use_vision
@@ -372,42 +391,20 @@ def make_mujoco_playground_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn):
     train_env = train_wrap_env_fn(train_env)
     if action_delay_max is not None:
         train_env = ActionDelayWrapper(train_env, action_delay_max)
-    # train_key, eval_key = jax.random.split(jax.random.PRNGKey(cfg.training.seed))
-    # if vision and cfg.training.train_domain_randomization:
-    #     train_randomization_fn = functools.partial(
-    #         randomization_fns[task_cfg.task_name], num_worlds=cfg.training.num_envs
-    #     )
-    # else:
-    #     train_randomization_fn = (
-    #         prepare_randomization_fn(
-    #             train_key,
-    #             cfg.training.num_envs,
-    #             task_cfg.train_params,
-    #             task_cfg.task_name,
-    #         )
-    #         if cfg.training.train_domain_randomization
-    #         else None
-    #     )
-    randomize_fn = functools.partial(randomization_fns[task_cfg.task_name],cfg=task_cfg.train_params)
-    keys = list(task_cfg.train_params.keys())  # or your own fixed order
-    bounds = jnp.array([task_cfg.train_params[k] for k in keys])
-    train_low, train_high = bounds[:,0], bounds[:,1]
 
-    # train_env = wrap_for_brax_training(
-    #     train_env,
-    #     randomization_fn=train_randomization_fn,
-    #     episode_length=cfg.training.episode_length,
-    #     action_repeat=cfg.training.action_repeat,
-    #     augment_state=False,
-    #     hard_resets=cfg.training.hard_resets,
-    #     vision=vision,
-    #     num_vision_envs=cfg.training.num_envs,
-    # )
+    # domain_randomization 함수의 인자 중, cfg 인자 고정
+    randomize_fn = functools.partial(
+        randomization_fns[task_cfg.task_name], cfg=task_cfg.train_params
+    )
+    keys = list(task_cfg.train_params.keys())
+    bounds = jnp.array([task_cfg.train_params[k] for k in keys])
+    train_low, train_high = bounds[:, 0], bounds[:, 1]
+
     train_env = wrap_for_adv_training(
         train_env,
-        param_size= len(train_low),
-        dr_range_low = train_low,
-        dr_range_high =  train_high,
+        param_size=len(train_low),
+        dr_range_low=train_low,
+        dr_range_high=train_high,
         randomization_fn=randomize_fn,
         episode_length=cfg.training.episode_length,
         action_repeat=cfg.training.action_repeat,
@@ -420,32 +417,18 @@ def make_mujoco_playground_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn):
     eval_env = eval_wrap_env_fn(eval_env)
     if action_delay_max is not None:
         eval_env = ActionDelayWrapper(eval_env, action_delay_max)
-    # eval_randomization_fn = (
-    #     prepare_randomization_fn(
-    #         eval_key,
-    #         cfg.training.num_eval_envs,
-    #         task_cfg.eval_params,
-    #         task_cfg.task_name,
-    #     )
-    #     if cfg.training.eval_domain_randomization
-    #     else None
-    # )
-    # eval_env = wrap_for_brax_training(
-    #     eval_env,
-    #     episode_length=cfg.training.episode_length,
-    #     action_repeat=cfg.training.action_repeat,
-    #     randomization_fn=eval_randomization_fn,
-    #     augment_state=False,
-    # )
-    randomize_fn = functools.partial(randomization_fns[task_cfg.task_name],cfg=task_cfg.eval_params)
-    keys = list(task_cfg.eval_params.keys())  # or your own fixed order
+
+    randomize_fn = functools.partial(
+        randomization_fns[task_cfg.task_name], cfg=task_cfg.eval_params
+    )
+    keys = list(task_cfg.eval_params.keys())
     bounds = jnp.array([task_cfg.eval_params[k] for k in keys])
-    eval_low, eval_high = bounds[:,0], bounds[:,1]
+    eval_low, eval_high = bounds[:, 0], bounds[:, 1]
     eval_env = wrap_for_adv_training(
         eval_env,
-        param_size= len(eval_low),
-        dr_range_low = eval_low,
-        dr_range_high =  eval_high,
+        param_size=len(eval_low),
+        dr_range_low=eval_low,
+        dr_range_high=eval_high,
         randomization_fn=randomize_fn,
         episode_length=cfg.training.episode_length,
         action_repeat=cfg.training.action_repeat,
