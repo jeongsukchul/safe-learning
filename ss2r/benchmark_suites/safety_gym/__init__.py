@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 from PIL import Image, ImageDraw
 
+from ss2r.benchmark_suites import adv_wrapper
 from ss2r.benchmark_suites.wrappers import DomainRandomizationVmap
 from ss2r.common.pytree import pytrees_unstack
 from ss2r.rl.utils import rollout
@@ -27,6 +28,8 @@ def _dig(env):
     if env == env.unwrapped:
         raise ValueError("Not wrapped")
     if isinstance(env, DomainRandomizationVmap):
+        return env
+    if isinstance(env, adv_wrapper.AdVmapWrapper):
         return env
     else:
         return _dig(env.env)

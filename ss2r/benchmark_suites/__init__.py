@@ -3,17 +3,9 @@ import functools
 
 import jax
 import jax.numpy as jnp
-from brax import envs
 from mujoco_playground import dm_control_suite, locomotion, manipulation
-from mujoco_playground._src.manipulation.franka_emika_panda.randomize_vision import (
-    domain_randomize as franka_vision_randomize,
-)
-
-from ss2r.benchmark_suites import brax, mujoco_playground, safety_gym
+from ss2r.benchmark_suites import mujoco_playground, safety_gym
 from ss2r.benchmark_suites.adv_wrapper import wrap_for_adv_training
-from ss2r.benchmark_suites.brax.ant import ant
-from ss2r.benchmark_suites.brax.cartpole import cartpole
-from ss2r.benchmark_suites.brax.humanoid import humanoid
 from ss2r.benchmark_suites.mujoco_playground.cartpole import cartpole as dm_cartpole
 from ss2r.benchmark_suites.mujoco_playground.cartpole.spidr_cartpole import (
     VisionSPiDRCartpole,
@@ -27,10 +19,8 @@ from ss2r.benchmark_suites.mujoco_playground.go2_joystick import (
 )
 from ss2r.benchmark_suites.mujoco_playground.humanoid import humanoid as dm_humanoid
 
-from ss2r.benchmark_suites.mujoco_playground.pick_cartesian import pick_cartesian
 from ss2r.benchmark_suites.mujoco_playground.quadruped import quadruped
 from ss2r.benchmark_suites.mujoco_playground.walker import walker
-from ss2r.benchmark_suites.rccar import rccar
 from ss2r.benchmark_suites.safety_gym import go_to_goal
 from ss2r.benchmark_suites.utils import (
     flatten_params,
@@ -62,11 +52,6 @@ locomotion.register_environment(
 )
 locomotion.register_environment(
     "Go2Footstand", handstand.Footstand, handstand.default_config
-)
-manipulation.register_environment(
-    "PandaPickCubeCartesianExtended",
-    pick_cartesian.PandaPickCubeCartesian,
-    pick_cartesian.default_config(),
 )
 
 def get_wrap_env_fn(cfg):
@@ -152,11 +137,7 @@ def make(cfg, train_wrap_env_fn=lambda env: env, eval_wrap_env_fn=lambda env: en
     domain_name = get_domain_name(cfg)
     print("cfg", cfg)
     print("domain name", domain_name)
-    if domain_name == "brax":
-        return make_brax_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn)
-    elif domain_name == "rccar":
-        return make_rccar_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn)
-    elif domain_name == "mujoco_playground":
+    if domain_name == "mujoco_playground":
         return make_mujoco_playground_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn)
     elif domain_name == "safety_gym":
         return make_safety_gym_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn)
@@ -178,120 +159,6 @@ def prepare_randomization_fn(key, num_envs, cfg, task_name):
 
     return vf_randomization_fn
 
-
-def make_rccar_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn, use_vision=False):
-    if "use_vision" in cfg.agent and cfg.agent.use_vision:
-        raise ValueError("RCCar does not support vision.")
-    task_cfg = dict(get_task_config(cfg))
-    task_cfg.pop("domain_name")
-    task_cfg.pop("task_name")
-    train_car_params = task_cfg.pop("train_params")
-    eval_car_params = task_cfg.pop("eval_params")
-    train_key, eval_key = jax.random.split(jax.random.PRNGKey(cfg.training.seed))
-
-    action_delay, observation_delay = (
-        task_cfg.pop("action_delay"),
-        task_cfg.pop("observation_delay"),
-    )
-    sliding_window = task_cfg.pop("sliding_window")
-    # Create train environment with built-in features
-    train_env = rccar.RCCar(
-        train_car_params["nominal"],
-        action_delay=action_delay,
-        observation_delay=observation_delay,
-        sliding_window=sliding_window,
-        **task_cfg,
-    )
-    train_env = train_wrap_env_fn(train_env)
-    
-    train_randomization_fn = (
-        prepare_randomization_fn(
-            train_key,
-            cfg.training.num_envs,
-            train_car_params,
-            cfg.environment.task_name,
-        )
-        if cfg.training.train_domain_randomization
-        else None
-    )
-    train_env = wrap(
-        train_env,
-        episode_length=cfg.training.episode_length,
-        action_repeat=cfg.training.action_repeat,
-        randomization_fn=train_randomization_fn,
-        augment_state=False,
-    )
-
-    # Create eval environment with built-in features
-    eval_env = rccar.RCCar(
-        eval_car_params["nominal"],
-        action_delay=action_delay,
-        observation_delay=observation_delay,
-        sliding_window=sliding_window,
-        **task_cfg,
-    )
-    eval_env = eval_wrap_env_fn(eval_env)
-    eval_randomization_fn = (
-        prepare_randomization_fn(
-            eval_key,
-            cfg.training.num_eval_envs,
-            eval_car_params,
-            cfg.environment.task_name,
-        )
-        if cfg.training.eval_domain_randomization
-        else None
-    )
-    eval_env = wrap(
-        eval_env,
-        episode_length=cfg.training.episode_length,
-        action_repeat=cfg.training.action_repeat,
-        randomization_fn=eval_randomization_fn,
-        augment_state=False,
-    )
-    return train_env, eval_env
-
-
-def make_brax_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn):
-    if "use_vision" in cfg.agent and cfg.agent.use_vision:
-        raise ValueError("RCCar does not support vision.")
-    task_cfg = get_task_config(cfg)
-    train_env = envs.get_environment(
-        task_cfg.task_name, backend=cfg.environment.backend, **task_cfg.task_params
-    )
-    train_env = train_wrap_env_fn(train_env)
-    train_key, eval_key = jax.random.split(jax.random.PRNGKey(cfg.training.seed))
-    train_randomization_fn = (
-        prepare_randomization_fn(
-            train_key, cfg.training.num_envs, task_cfg.train_params, task_cfg.task_name
-        )
-        if cfg.training.train_domain_randomization
-        else None
-    )
-    train_env = wrap(
-        train_env,
-        episode_length=cfg.training.episode_length,
-        action_repeat=cfg.training.action_repeat,
-        randomization_fn=train_randomization_fn,
-        augment_state=False,
-        hard_resets=cfg.training.hard_resets,
-    )
-    eval_env = envs.get_environment(
-        task_cfg.task_name, backend=cfg.environment.backend, **task_cfg.task_params
-    )
-    eval_env = eval_wrap_env_fn(eval_env)
-    eval_randomization_fn = prepare_randomization_fn(
-        eval_key, cfg.training.num_eval_envs, task_cfg.eval_params, task_cfg.task_name
-    )
-    eval_env = wrap(
-        eval_env,
-        episode_length=cfg.training.episode_length,
-        action_repeat=cfg.training.action_repeat,
-        randomization_fn=eval_randomization_fn
-        if cfg.training.eval_domain_randomization
-        else None,
-        augment_state=False,
-    )
-    return train_env, eval_env
 
 
 def _preinitialize_vision_env(task_name, task_params, registry):
@@ -373,8 +240,6 @@ def make_mujoco_playground_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn):
     from ml_collections import config_dict
     from mujoco_playground import registry
 
-    from ss2r.benchmark_suites.mujoco_playground import wrap_for_brax_training
-
     task_cfg = get_task_config(cfg) # cfg 불러오기 (Omegaconf 객체)
     task_dict = OmegaConf.to_container(task_cfg, resolve=True) # task_cfg(Omegaconf 객체) -> dict으로 변환
     task_cfg = OmegaConf.create( # 평탄화된 params 생성 ex) humanoid의 gear_hip.x -> gear_hip_x
@@ -443,56 +308,62 @@ def make_mujoco_playground_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn):
 
 
 def make_safety_gym_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn):
-    from ss2r.benchmark_suites.mujoco_playground import wrap_for_brax_training
     from ss2r.benchmark_suites.safety_gym import go_to_goal
+    from omegaconf import OmegaConf
 
     task_cfg = get_task_config(cfg)
+    task_dict = OmegaConf.to_container(task_cfg, resolve=True)
+    task_cfg = OmegaConf.create(
+        {
+            **task_dict,
+            "train_params": flatten_params(task_dict["train_params"]),
+            "eval_params": flatten_params(task_dict["eval_params"]),
+        }
+    )
     train_env = go_to_goal.GoToGoal(**task_cfg.task_params)
     train_env = train_wrap_env_fn(train_env)
     eval_env = go_to_goal.GoToGoal(**task_cfg.task_params)
     eval_env = eval_wrap_env_fn(eval_env)
-    train_key, eval_key = jax.random.split(jax.random.PRNGKey(cfg.training.seed))
-    train_randomization_fn = (
-        prepare_randomization_fn(
-            train_key, cfg.training.num_envs, task_cfg.train_params, task_cfg.task_name
-        )
-        if cfg.training.train_domain_randomization
-        else None
+
+    randomize_fn = functools.partial(
+        randomization_fns[task_cfg.task_name], cfg=task_cfg.train_params
     )
-    train_env = wrap_for_brax_training(
+    keys = list(task_cfg.train_params.keys())
+    bounds = jnp.array([task_cfg.train_params[k] for k in keys])
+    train_low, train_high = bounds[:, 0], bounds[:, 1]
+    train_env = wrap_for_adv_training(
         train_env,
-        randomization_fn=train_randomization_fn,
+        param_size=len(train_low),
+        dr_range_low=train_low,
+        dr_range_high=train_high,
+        randomization_fn=randomize_fn,
         episode_length=cfg.training.episode_length,
         action_repeat=cfg.training.action_repeat,
         augment_state=False,
         hard_resets=cfg.training.hard_resets,
     )
-    eval_randomization_fn = (
-        prepare_randomization_fn(
-            eval_key,
-            cfg.training.num_eval_envs,
-            task_cfg.eval_params,
-            task_cfg.task_name,
-        )
-        if cfg.training.eval_domain_randomization
-        else None
+
+    randomize_fn = functools.partial(
+        randomization_fns[task_cfg.task_name], cfg=task_cfg.eval_params
     )
-    eval_env = wrap_for_brax_training(
+    keys = list(task_cfg.eval_params.keys())
+    bounds = jnp.array([task_cfg.eval_params[k] for k in keys])
+    eval_low, eval_high = bounds[:, 0], bounds[:, 1]
+    eval_env = wrap_for_adv_training(
         eval_env,
+        param_size=len(eval_low),
+        dr_range_low=eval_low,
+        dr_range_high=eval_high,
+        randomization_fn=randomize_fn,
         episode_length=cfg.training.episode_length,
         action_repeat=cfg.training.action_repeat,
-        randomization_fn=eval_randomization_fn,
         augment_state=False,
+        hard_resets=cfg.training.hard_resets,
     )
-    return train_env, eval_env
+    return train_env, eval_env, task_cfg
 
 
 randomization_fns = {
-    "cartpole": cartpole.domain_randomization,
-    "cartpole_safe": cartpole.domain_randomization,
-    "rccar": rccar.domain_randomization,
-    "humanoid": humanoid.domain_randomization,
-    "humanoid_safe": humanoid.domain_randomization,
     "G1JoystickFlatTerrain": g1_joystick.domain_randomization,
     "Go1JoystickFlatTerrain": go1_joystick.domain_randomization,
     "Go1JoystickRoughTerrain": go1_joystick.domain_randomization,
@@ -501,8 +372,6 @@ randomization_fns = {
     "SafeJointTorqueGo1JoystickFlatTerrain": go1_joystick.domain_randomization,
     "Go2JoystickFlatTerrain": go1_joystick.domain_randomization,
     "Go2JoystickRoughTerrain": go1_joystick.domain_randomization,
-    "ant": ant.domain_randomization,
-    "ant_safe": ant.domain_randomization,
     "QuadrupedWalk": quadruped.domain_randomization,
     "QuadrupedRun": quadruped.domain_randomization,
     "SafeQuadrupedWalk": quadruped.domain_randomization,
@@ -522,25 +391,11 @@ randomization_fns = {
     "HumanoidWalk": dm_humanoid.domain_randomization,
     "HumanoidStand": dm_humanoid.domain_randomization,
     "SafeHumanoidWalk": dm_humanoid.domain_randomization,
-    "AlohaPegInsertionDistill": manipulation.get_domain_randomizer(
-        "AlohaPegInsertionDistill"
-    ),
-    "AlohaSinglePegInsertion": manipulation.get_domain_randomizer(
-        "AlohaSinglePegInsertion"
-    ),
     "go_to_goal": go_to_goal.domain_randomization,
-    "PandaPickCubeCartesian": franka_vision_randomize,
-    "PandaPickCubeCartesianExtended": pick_cartesian.domain_randomize,
 }
 
 render_fns = {
-    "cartpole": brax.render,
-    "cartpole_safe": brax.render,
-    "humanoid": functools.partial(brax.render, camera="track"),
-    "humanoid_safe": functools.partial(brax.render, camera="track"),
-    "ant": functools.partial(brax.render, camera="track"),
-    "ant_safe": functools.partial(brax.render, camera="track"),
-    "rccar": rccar.render,
+
     "G1JoystickFlatTerrain": functools.partial(
         mujoco_playground.render, camera="track"
     ),
@@ -584,13 +439,5 @@ render_fns = {
     "HumanoidWalk": mujoco_playground.render,
     "HumanoidStand": mujoco_playground.render,
     "SafeHumanoidWalk": mujoco_playground.render,
-    "AlohaSinglePegInsertion": mujoco_playground.render,
-    "AlohaPegInsertionDistill": mujoco_playground.render,
-    "PandaPickCubeCartesian": functools.partial(
-        mujoco_playground.render, num_envs=None, camera="front"
-    ),
-    "PandaPickCubeCartesianExtended": functools.partial(
-        mujoco_playground.render, num_envs=None, camera="front"
-    ),
     "go_to_goal": functools.partial(safety_gym.render, camera="fixedfar"),
 }

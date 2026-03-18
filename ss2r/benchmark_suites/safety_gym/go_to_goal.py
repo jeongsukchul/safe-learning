@@ -1,3 +1,4 @@
+import functools
 from collections import defaultdict
 from itertools import product
 from typing import Any, Dict, Mapping, NamedTuple, Sequence, Tuple, Union
@@ -31,47 +32,63 @@ _EXTENTS = (-2.0, -2.0, 2.0, 2.0)
 _ROBOT_ID = 1
 
 
-def domain_randomization(sys, rng, cfg):
-    @jax.vmap
-    def randomize(rng):
-        rng, rng_ = jax.random.split(rng)
-        damping_x_sample = jax.random.uniform(
-            rng_, minval=cfg.damping.x[0], maxval=cfg.damping.x[1]
+def domain_randomization(cfg, sys, params=None, rng: jax.Array = None):
+    if rng is not None:
+        dr_low = jp.array(
+            [
+                cfg.damping_x[0],
+                cfg.damping_y[0],
+                cfg.damping_z[0],
+                cfg.gear_x[0],
+                cfg.gear_z[0],
+                cfg.mass[0],
+            ]
         )
-        rng, rng_ = jax.random.split(rng)
-        damping_y_sample = jax.random.uniform(
-            rng_, minval=cfg.damping.y[0], maxval=cfg.damping.y[1]
+        dr_high = jp.array(
+            [
+                cfg.damping_x[1],
+                cfg.damping_y[1],
+                cfg.damping_z[1],
+                cfg.gear_x[1],
+                cfg.gear_z[1],
+                cfg.mass[1],
+            ]
         )
-        rng, rng_ = jax.random.split(rng)
-        damping_z_sample = jax.random.uniform(
-            rng_, minval=cfg.damping.z[0], maxval=cfg.damping.z[1]
-        )
-        damping = jp.hstack((damping_x_sample, damping_y_sample, damping_z_sample))
-        dof_damping = sys.dof_damping.at[:3].multiply(damping)
-        gear = sys.actuator_gear.copy()
-        rng, rng_ = jax.random.split(rng)
-        gear_x_sample = jax.random.uniform(
-            rng, minval=cfg.gear.x[0], maxval=cfg.gear.x[1]
-        )
-        rng, rng_ = jax.random.split(rng)
-        gear_z_sample = jax.random.uniform(
-            rng, minval=cfg.gear.z[0], maxval=cfg.gear.z[1]
-        )
-        gear = gear.at[0, 0].add(gear_x_sample)
-        gear = gear.at[1, 0].add(gear_z_sample)
-        rng, rng_ = jax.random.split(rng)
-        mass_scale = jax.random.uniform(rng_, minval=cfg.mass[0], maxval=cfg.mass[1])
-        mass = sys.body_mass.at[_ROBOT_ID].multiply(mass_scale)
-        inertia = sys.body_inertia.at[_ROBOT_ID, :].multiply(mass_scale**3)
-        return (
-            dof_damping,
-            gear,
-            mass,
-            inertia,
-            jp.hstack((damping, gear_x_sample, gear_z_sample, mass_scale)),
+        dist = functools.partial(
+            jax.random.uniform,
+            shape=(dr_low.shape[0],),
+            minval=dr_low,
+            maxval=dr_high,
         )
 
-    dof_damping, gear, mass, inertia, samples = randomize(rng)
+    def _apply_params(p):
+        damping = p[:3]
+        gear_x_sample, gear_z_sample, mass_scale = p[3], p[4], p[5]
+
+        dof_damping = sys.dof_damping.at[:3].multiply(damping)
+
+        gear = sys.actuator_gear.copy()
+        gear = gear.at[0, 0].add(gear_x_sample)
+        gear = gear.at[1, 0].add(gear_z_sample)
+
+        mass = sys.body_mass.at[_ROBOT_ID].multiply(mass_scale)
+        inertia = sys.body_inertia.at[_ROBOT_ID, :].multiply(mass_scale**3)
+        return dof_damping, gear, mass, inertia
+
+    def shift_dynamics(params_vec):
+        return _apply_params(params_vec)
+
+    def rand_dynamics(rng_i):
+        p = dist(rng_i)
+        return _apply_params(p), p
+
+    if rng is None and params is not None:
+        dof_damping, gear, mass, inertia = shift_dynamics(params)
+    elif rng is not None and params is None:
+        (dof_damping, gear, mass, inertia), packed = rand_dynamics(rng)
+    else:
+        raise ValueError("Provide exactly one of (rng, params).")
+
     in_axes = jax.tree_util.tree_map(lambda x: None, sys)
     in_axes = in_axes.tree_replace(
         {
@@ -89,7 +106,7 @@ def domain_randomization(sys, rng, cfg):
             "body_mass": mass,
         }
     )
-    return sys, in_axes, samples
+    return sys, in_axes
 
 
 @struct.dataclass

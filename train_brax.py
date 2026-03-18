@@ -11,7 +11,13 @@ from ss2r import benchmark_suites
 from ss2r.algorithms import ppo, sac
 from ss2r.common.logging import TrainingLogger
 from ss2r.common.wandb import get_state_path, get_wandb_checkpoint
+import os
 
+xla_flags = os.environ.get("XLA_FLAGS", "")
+xla_flags += " --xla_gpu_triton_gemm_any=True"
+os.environ["XLA_FLAGS"] = xla_flags
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["MUJOCO_GL"] = "egl"
 _LOG = logging.getLogger(__name__)
 
 
