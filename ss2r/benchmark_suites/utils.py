@@ -1,4 +1,9 @@
-from omegaconf import DictConfig
+from typing import Any
+
+try:
+    from omegaconf import DictConfig
+except ModuleNotFoundError:
+    DictConfig = Any
 
 
 def get_domain_name(cfg: DictConfig) -> str:
@@ -34,4 +39,3 @@ def flatten_params(params, prefix=""):
                 f"param '{key}': expected [low, high] or nested dict, got {type(v)}"
             )
     return result
-

@@ -9,6 +9,7 @@ import mujoco as mj
 import numpy as np
 from etils import epath
 from flax import struct
+from ml_collections import config_dict
 from mujoco import mjx
 from mujoco_playground._src import mjx_env
 
@@ -30,6 +31,13 @@ _ROBOT_TO_SENSOR_TO_COMPONENTS = {
 _EXTENTS = (-2.0, -2.0, 2.0, 2.0)
 
 _ROBOT_ID = 1
+
+
+def default_config() -> config_dict.ConfigDict:
+    return config_dict.create(
+        ctrl_dt=0.02,
+        sim_dt=0.01,
+    )
 
 
 def domain_randomization(cfg, sys, params=None, rng: jax.Array = None):
@@ -212,8 +220,11 @@ class GoToGoal(mjx_env.MjxEnv):
         num_hazards: int = 10,
         num_vases: int = 10,
         goal_size: float = 0.3,
+        config: config_dict.ConfigDict = default_config(),
     ):
+        super().__init__(config)
         self.goal_size = goal_size
+        self._xml_path = _XML_PATH.as_posix()
         self.spec = {
             "robot": ObjectSpec(0.4, 1),
             "goal": ObjectSpec(goal_size + 0.05, 1),
@@ -226,6 +237,7 @@ class GoToGoal(mjx_env.MjxEnv):
             mj_spec, layout=layout, visualize=visualize_lidar, goal_size=goal_size
         )
         self._mj_model = mj_spec.compile()
+        self._mj_model.opt.timestep = self.sim_dt
         self._mjx_model = mjx.put_model(self._mj_model)
         self._post_init()
 
@@ -422,7 +434,7 @@ class GoToGoal(mjx_env.MjxEnv):
             self._mj_model.actuator_ctrlrange[:, 1],
         )
         action = (action + 1.0) / 2.0 * (upper - lower) + lower
-        data = mjx_env.step(self._mjx_model, state.data, action, n_substeps=2)
+        data = mjx_env.step(self._mjx_model, state.data, action, self.n_substeps)
         reward, goal_dist = self.get_reward(data, state.info["last_goal_dist"])
         # Reset goal if robot inside goal
         condition = goal_dist <= self.goal_size + 1e-2
@@ -447,7 +459,7 @@ class GoToGoal(mjx_env.MjxEnv):
 
     @property
     def xml_path(self) -> str:
-        return _XML_PATH
+        return self._xml_path
 
     @property
     def action_size(self) -> int:

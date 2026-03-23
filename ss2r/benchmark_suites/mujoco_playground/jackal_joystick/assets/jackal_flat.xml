@@ -1,0 +1,85 @@
+<mujoco model="jackal_flat">
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.004" gravity="0 0 -9.81" integrator="implicitfast"/>
+
+  <default>
+    <joint damping="0.2" armature="0.02"/>
+    <geom condim="6" friction="0.9 0.02 0.01" solimp="0.95 0.99 0.001" solref="0.004 1"/>
+    <motor ctrllimited="true" ctrlrange="-1 1"/>
+  </default>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.25 0.25 0.25" specular="0.1 0.1 0.1"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global offwidth="1920" offheight="1080"/>
+  </visual>
+
+  <asset>
+    <texture name="groundplane" type="2d" builtin="checker" rgb1="0.20 0.24 0.28" rgb2="0.13 0.16 0.19" width="512" height="512"/>
+    <material name="groundplane" texture="groundplane" texrepeat="8 8" texuniform="true" reflectance="0.1"/>
+    <material name="dark_grey" rgba="0.20 0.20 0.20 1"/>
+    <material name="light_grey" rgba="0.40 0.40 0.40 1"/>
+    <material name="yellow" rgba="0.80 0.80 0.00 1"/>
+    <material name="black" rgba="0.15 0.15 0.15 1"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 3" dir="0 0 -1" directional="true"/>
+    <geom name="floor" type="plane" size="0 0 0.05" material="groundplane"/>
+
+    <body name="base_link" pos="0 0 0.0635">
+      <freejoint/>
+      <camera name="track" pos="-1.8 0 1.0" xyaxes="0 -1 0 0.4 0 1"/>
+
+      <body name="chassis_link">
+        <inertial pos="0.012 0.002 0.067" mass="16.523" diaginertia="0.3136 0.3922 0.4485"/>
+
+        <geom name="chassis_collision" type="box" pos="0 0 0.092" size="0.21 0.155 0.092" material="dark_grey"/>
+        <geom name="chassis_visual" type="box" pos="0 0 0.092" size="0.205 0.15 0.088" material="light_grey"/>
+
+        <body name="front_left_wheel_link" pos="0.131 0.187795 0.0345">
+          <joint name="front_left_wheel_joint" type="hinge" axis="0 1 0" damping="0.4"/>
+          <geom name="front_left_wheel" type="cylinder" size="0.098 0.02" quat="0.7071068 0.7071068 0 0" material="black"/>
+        </body>
+        <body name="front_right_wheel_link" pos="0.131 -0.187795 0.0345">
+          <joint name="front_right_wheel_joint" type="hinge" axis="0 1 0" damping="0.4"/>
+          <geom name="front_right_wheel" type="cylinder" size="0.098 0.02" quat="0.7071068 0.7071068 0 0" material="black"/>
+        </body>
+        <body name="rear_left_wheel_link" pos="-0.131 0.187795 0.0345">
+          <joint name="rear_left_wheel_joint" type="hinge" axis="0 1 0" damping="0.4"/>
+          <geom name="rear_left_wheel" type="cylinder" size="0.098 0.02" quat="0.7071068 0.7071068 0 0" material="black"/>
+        </body>
+        <body name="rear_right_wheel_link" pos="-0.131 -0.187795 0.0345">
+          <joint name="rear_right_wheel_joint" type="hinge" axis="0 1 0" damping="0.4"/>
+          <geom name="rear_right_wheel" type="cylinder" size="0.098 0.02" quat="0.7071068 0.7071068 0 0" material="black"/>
+        </body>
+
+        <geom name="front_fender" type="box" pos="0.166 0 0.122" size="0.094 0.168 0.022" material="yellow"/>
+        <geom name="rear_fender" type="box" pos="-0.166 0 0.122" size="0.094 0.168 0.022" material="yellow"/>
+        <geom name="top_plate" type="box" pos="0 0 0.184" size="0.17 0.115 0.01" material="black"/>
+        <geom name="front_mount_geom" type="box" pos="0.12 0 0.192" size="0.03 0.02 0.008" material="black"/>
+        <geom name="rear_mount_geom" type="box" pos="-0.12 0 0.192" size="0.03 0.02 0.008" material="black"/>
+
+        <body name="imu_link" pos="0 0 0.1815">
+          <site name="imu" pos="0 0 0" size="0.008"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <sensor>
+    <gyro name="imu_gyro" site="imu"/>
+    <accelerometer name="imu_accel" site="imu"/>
+    <framequat name="base_link_quat" objtype="body" objname="base_link"/>
+    <subtreelinvel name="base_link_subtreelinvel" body="base_link"/>
+    <framequat name="torso_quat" objtype="body" objname="base_link"/>
+    <subtreelinvel name="torso_subtreelinvel" body="base_link"/>
+  </sensor>
+
+  <actuator>
+    <motor name="front_left_motor" joint="front_left_wheel_joint" gear="20"/>
+    <motor name="front_right_motor" joint="front_right_wheel_joint" gear="20"/>
+    <motor name="rear_left_motor" joint="rear_left_wheel_joint" gear="20"/>
+    <motor name="rear_right_motor" joint="rear_right_wheel_joint" gear="20"/>
+  </actuator>
+</mujoco>

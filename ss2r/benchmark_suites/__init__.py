@@ -11,6 +11,7 @@ from ss2r.benchmark_suites.mujoco_playground.cartpole.spidr_cartpole import (
     VisionSPiDRCartpole,
 )
 from ss2r.benchmark_suites.mujoco_playground.g1_joystick import g1_joystick
+from ss2r.benchmark_suites.mujoco_playground.jackal_joystick import jackal_joystick
 from ss2r.benchmark_suites.mujoco_playground.go1_joystick import go1_joystick
 from ss2r.benchmark_suites.mujoco_playground.go2_joystick import (
     getup,
@@ -52,6 +53,16 @@ locomotion.register_environment(
 )
 locomotion.register_environment(
     "Go2Footstand", handstand.Footstand, handstand.default_config
+)
+locomotion.register_environment(
+    "JackalJoystickFlatTerrain",
+    jackal_joystick.JackalJoystick,
+    jackal_joystick.default_config,
+)
+locomotion.register_environment(
+    "JackalGoToGoalFlatTerrain",
+    jackal_joystick.JackalGoToGoal,
+    jackal_joystick.go_to_goal_config,
 )
 
 def get_wrap_env_fn(cfg):
@@ -391,6 +402,8 @@ randomization_fns = {
     "HumanoidWalk": dm_humanoid.domain_randomization,
     "HumanoidStand": dm_humanoid.domain_randomization,
     "SafeHumanoidWalk": dm_humanoid.domain_randomization,
+    "JackalJoystickFlatTerrain": jackal_joystick.domain_randomization,
+    "JackalGoToGoalFlatTerrain": jackal_joystick.domain_randomization,
     "go_to_goal": go_to_goal.domain_randomization,
 }
 
@@ -439,5 +452,11 @@ render_fns = {
     "HumanoidWalk": mujoco_playground.render,
     "HumanoidStand": mujoco_playground.render,
     "SafeHumanoidWalk": mujoco_playground.render,
+    "JackalJoystickFlatTerrain": functools.partial(
+        mujoco_playground.render, camera="track"
+    ),
+    "JackalGoToGoalFlatTerrain": functools.partial(
+        mujoco_playground.render, camera="track"
+    ),
     "go_to_goal": functools.partial(safety_gym.render, camera="fixedfar"),
 }
