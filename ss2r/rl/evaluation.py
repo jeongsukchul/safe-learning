@@ -380,10 +380,12 @@ class ConstraintsAdvEvaluator(Evaluator):
             # eval_metrics = eval_state.info['eval_metrics']
             return carry, eval_state
         _, eval_state = jax.lax.scan(f, None, unroll_key)
-        # eval_state = self._generate_eval_unroll(policy_params, dynamics_params, unroll_key)
-        constraint = eval_state.info["eval_metrics"].episode_metrics["cost"].mean(0)
-        eval_state.info["eval_metrics"].episode_metrics["cost"] = constraint
-        safe = np.where(constraint < self.budget, 1.0, 0.0)
+        # shape: [num_episodes, num_eval_envs]
+        cost_by_episode = np.asarray(eval_state.info["eval_metrics"].episode_metrics["cost"])
+        param_cost_mean = cost_by_episode.mean(axis=0)
+        param_cost_std = cost_by_episode.std(axis=0)
+        eval_state.info["eval_metrics"].episode_metrics["cost"] = param_cost_mean
+        safe = np.where(param_cost_mean < self.budget, 1.0, 0.0)
         eval_state.info["eval_metrics"].episode_metrics["safe"] = safe
         eval_metrics = eval_state.info["eval_metrics"]
         eval_metrics.active_episodes.block_until_ready()
@@ -402,6 +404,12 @@ class ConstraintsAdvEvaluator(Evaluator):
         metrics[f"{prefix}/avg_episode_length"] = np.mean(eval_metrics.episode_steps)
         metrics[f"{prefix}/epoch_eval_time"] = epoch_eval_time
         metrics[f"{prefix}/sps"] = self._steps_per_unroll / epoch_eval_time
+        metrics[f"{prefix}/param_cost_mean"] = float(np.mean(param_cost_mean))
+        metrics[f"{prefix}/param_cost_std"] = float(np.std(param_cost_mean))
+        metrics[f"{prefix}/param_cost_min"] = float(np.min(param_cost_mean))
+        for i, (mean_v, std_v) in enumerate(zip(param_cost_mean, param_cost_std)):
+            metrics[f"{prefix}/param_cost/param_{i}/mean"] = float(mean_v)
+            metrics[f"{prefix}/param_cost/param_{i}/std"] = float(std_v)
         self._eval_walltime = self._eval_walltime + epoch_eval_time
         metrics = {
             f"{prefix}/walltime": self._eval_walltime,

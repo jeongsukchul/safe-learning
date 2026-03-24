@@ -19,7 +19,7 @@ from brax.envs.wrappers import training as brax_training
 
 def wrap_for_adv_training(
     env: mjx_env.MjxEnv,
-    param_size: int,
+    param_size: int | None = None,
     episode_length: int = 1000,
     action_repeat: int = 1,
     randomization_fn: Optional[Callable[[mjx.Model], Tuple[mjx.Model, mjx.Model]]] = None,
@@ -38,19 +38,21 @@ def wrap_for_adv_training(
       randomization_fn: randomization function that produces a vectorized model
         and in_axes to vmap over
     """
-    # if randomization_fn is None:
-    #     env = brax_training.VmapWrapper(env)  # pytype: disable=wrong-arg-types
-
-    # else:
-    env = AdVmapWrapper(
-        env,
-        randomization_fn,
-        param_size,
-        dr_range_low,
-        dr_range_high,
-        get_grad,
-        augment_state,
-    )
+    if randomization_fn is None:
+        env = brax_training.VmapWrapper(env)  # pytype: disable=wrong-arg-types
+        env = NoRandomizationVmapWrapper(env)
+    else:
+        if param_size is None or param_size <= 0:
+            raise ValueError("param_size must be positive when randomization is enabled")
+        env = AdVmapWrapper(
+            env,
+            randomization_fn,
+            param_size,
+            dr_range_low,
+            dr_range_high,
+            get_grad,
+            augment_state,
+        )
     env = CostEpisodeWrapper(env, episode_length, action_repeat)
     if hard_resets:
         env = HardAutoResetWrapper(env)
@@ -59,9 +61,19 @@ def wrap_for_adv_training(
     return env
 
 
+class NoRandomizationVmapWrapper(Wrapper):
+    """Adapter to keep (state, action, params) signature without DR."""
+
+    def reset(self, rng: jax.Array) -> mjx_env.State:
+        return self.env.reset(rng)
+
+    def step(self, state: mjx_env.State, action: jax.Array, params: jax.Array) -> State:
+        del params
+        return self.env.step(state, action)
+
+
 class AdVmapWrapper(Wrapper):
     """Wrapper for domain randomization."""
-
     def __init__(
         self,
         env: mjx_env.MjxEnv,
@@ -82,6 +94,7 @@ class AdVmapWrapper(Wrapper):
         self.dr_range_low = dr_range_low
         self.dr_range_high = dr_range_high
         self.augment_state = augment_state
+
     @contextlib.contextmanager
     def v_env_fn(self, mjx_model: mjx.Model):
         base = self.env.unwrapped

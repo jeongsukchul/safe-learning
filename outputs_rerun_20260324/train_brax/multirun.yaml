@@ -1,0 +1,431 @@
+hydra:
+  run:
+    dir: ${log_dir}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ${log_dir}/${hydra.job.name}
+    subdir: ${hydra.job.override_dirname}/seed=${training.seed}
+  launcher:
+    _target_: hydra._internal.core_plugins.basic_launcher.BasicLauncher
+  sweeper:
+    _target_: hydra._internal.core_plugins.basic_sweeper.BasicSweeper
+    max_batch_size: null
+    params: null
+  help:
+    app_name: ${hydra.job.name}
+    header: '${hydra.help.app_name} is powered by Hydra.
+
+      '
+    footer: 'Powered by Hydra (https://hydra.cc)
+
+      Use --hydra-help to view Hydra specific help
+
+      '
+    template: '${hydra.help.header}
+
+      == Configuration groups ==
+
+      Compose your configuration from those groups (group=option)
+
+
+      $APP_CONFIG_GROUPS
+
+
+      == Config ==
+
+      Override anything in the config (foo.bar=value)
+
+
+      $CONFIG
+
+
+      ${hydra.help.footer}
+
+      '
+  hydra_help:
+    template: 'Hydra (${hydra.runtime.version})
+
+      See https://hydra.cc for more info.
+
+
+      == Flags ==
+
+      $FLAGS_HELP
+
+
+      == Configuration groups ==
+
+      Compose your configuration from those groups (For example, append hydra/job_logging=disabled
+      to command line)
+
+
+      $HYDRA_CONFIG_GROUPS
+
+
+      Use ''--cfg hydra'' to Show the Hydra config.
+
+      '
+    hydra_help: ???
+  hydra_logging:
+    version: 1
+    formatters:
+      simple:
+        format: '[%(asctime)s][HYDRA] %(message)s'
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: simple
+        stream: ext://sys.stdout
+    root:
+      level: INFO
+      handlers:
+      - console
+    loggers:
+      logging_example:
+        level: DEBUG
+    disable_existing_loggers: false
+  job_logging:
+    version: 1
+    formatters:
+      simple:
+        format: '[%(asctime)s][%(name)s][%(levelname)s] - %(message)s'
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: simple
+        stream: ext://sys.stdout
+      file:
+        class: logging.FileHandler
+        formatter: simple
+        filename: ${hydra.runtime.output_dir}/${hydra.job.name}.log
+    root:
+      level: INFO
+      handlers:
+      - console
+      - file
+    disable_existing_loggers: false
+  env: {}
+  mode: MULTIRUN
+  searchpath: []
+  callbacks: {}
+  output_subdir: .hydra
+  overrides:
+    hydra:
+    - hydra.mode=MULTIRUN
+    task:
+    - +experiment=walker_walk_dr,walker_walk_dr_spidr
+    - training.nonstationary=false,true
+    - log_dir=outputs_rerun_20260324
+  job:
+    name: train_brax
+    chdir: true
+    override_dirname: +experiment=walker_walk_dr,walker_walk_dr_spidr,training.nonstationary=false,true
+    id: ???
+    num: ???
+    config_name: train_brax
+    env_set: {}
+    env_copy: []
+    config:
+      override_dirname:
+        kv_sep: '='
+        item_sep: ','
+        exclude_keys:
+        - log_dir
+        - training.seed
+        - wandb
+  runtime:
+    version: 1.3.2
+    version_base: '1.3'
+    cwd: /home/core-dev/safe-learning
+    config_sources:
+    - path: hydra.conf
+      schema: pkg
+      provider: hydra
+    - path: /home/core-dev/safe-learning/ss2r/configs
+      schema: file
+      provider: main
+    - path: ''
+      schema: structured
+      provider: schema
+    output_dir: ???
+    choices:
+      environment: rccar
+      agent: sac
+      agent/replay_buffer: null
+      agent/data_collection: step
+      agent/propagation: null
+      agent/penalizer: crpo
+      agent/reward_robustness: null
+      agent/cost_robustness: null
+      hydra/env: default
+      hydra/callbacks: null
+      hydra/job_logging: default
+      hydra/hydra_logging: default
+      hydra/hydra_help: default
+      hydra/help: default
+      hydra/sweeper: basic
+      hydra/launcher: basic
+      hydra/output: default
+  verbose: false
+log_dir: outputs_rerun_20260324
+writers:
+- wandb
+- jsonl
+- stderr
+wandb:
+  group: null
+  notes: null
+  name: ${hydra:job.override_dirname}
+  entity: null
+jit: true
+training:
+  safe: true
+  safety_budget: 25
+  seed: 0
+  num_evals: 15
+  episode_length: 1000
+  num_envs: 2048
+  num_eval_envs: 128
+  num_eval_episodes: 10
+  action_repeat: 1
+  render: true
+  num_timesteps: 1000000
+  value_privileged: true
+  policy_privileged: false
+  train_domain_randomization: true
+  eval_domain_randomization: true
+  store_checkpoint: true
+  wandb_id: null
+  hard_resets: false
+  action_delay:
+    enable: false
+    max_delay: 0
+  nonstationary: false
+agent:
+  penalizer:
+    name: crpo
+    eta: 0.0
+    burnin: -1
+  data_collection:
+    name: step
+  name: sac
+  learning_rate: 0.0003
+  critic_learning_rate: 0.0003
+  cost_critic_learning_rate: 0.0003
+  alpha_learning_rate: 0.0003
+  init_alpha: 1.0
+  discounting: 0.99
+  min_alpha: 0.0
+  target_entropy: null
+  safety_discounting: 0.99
+  batch_size: 256
+  normalize_observations: true
+  reward_scaling: 1.0
+  cost_scaling: 1.0
+  tau: 0.005
+  min_replay_size: 8192
+  max_replay_size: 1000000
+  grad_updates_per_step: 512
+  num_critic_updates_per_actor_update: 1
+  deterministic_eval: true
+  policy_hidden_layer_sizes:
+  - 128
+  - 128
+  value_hidden_layer_sizes:
+  - 512
+  - 512
+  activation: swish
+  use_bro: true
+  normalize_budget: true
+  reset_on_eval: true
+  store_buffer: false
+  n_critics: 2
+  n_heads: 1
+  schedule_lr: false
+  init_lr: 0.0
+  actor_burnin: 0.0
+  actor_wait: 0.0
+  critic_burnin: 0.0
+  entropy_bonus: true
+  load_buffer: false
+  pessimistic_q: false
+environment:
+  domain_name: rccar
+  task_name: rccar
+  dt: 0.033
+  obstacles:
+  - - 0.75
+    - -0.55
+    - 0.25
+  - - 0.75
+    - -0.15
+    - 0.25
+  - - 0.75
+    - 0.25
+    - 0.25
+  - - 0.75
+    - 0.65
+    - 0.25
+  observation_delay: 0
+  action_delay: 0
+  sliding_window: 0
+  sample_init_pose: true
+  control_penalty_scale: 0.01
+  last_action_penalty_scale: 0.0
+  train_params:
+    nominal:
+      use_blend: 0.0
+      m: 1.65
+      l_f: 0.13
+      l_r: 0.17
+      angle_offset: 0.0
+      b_f: 2.75
+      b_r: 5.0
+      blend_ratio_lb: 0.01
+      blend_ratio_ub: 0.01
+      c_d: 0.0
+      c_f: 1.45
+      c_m_1: 30
+      c_m_2: 1.25
+      c_r: 1.3
+      d_f: 0.4
+      d_r: 0.3
+      i_com: 0.06
+      steering_limit: 0.6
+      max_throttle: 0.4
+    bounds:
+      use_blend:
+      - 0.0
+      - 0.0
+      m:
+      - 1.6
+      - 1.7
+      l_f:
+      - 0.125
+      - 0.135
+      l_r:
+      - 0.165
+      - 0.175
+      angle_offset:
+      - -0.15
+      - 0.15
+      b_f:
+      - 2.0
+      - 4.0
+      b_r:
+      - 3.0
+      - 10.0
+      blend_ratio_lb:
+      - 0.4
+      - 0.4
+      blend_ratio_ub:
+      - 0.5
+      - 0.5
+      c_d:
+      - 0.0
+      - 0.0
+      c_f:
+      - 1.1
+      - 2.0
+      c_m_1:
+      - 10.0
+      - 40.0
+      c_m_2:
+      - 1.0
+      - 1.5
+      c_r:
+      - 0.4
+      - 2.0
+      d_f:
+      - 0.25
+      - 0.6
+      d_r:
+      - 0.15
+      - 0.45
+      i_com:
+      - 0.03
+      - 0.18
+      steering_limit:
+      - 0.4
+      - 0.75
+      max_throttle:
+      - 0.4
+      - 0.6
+  eval_params:
+    nominal:
+      use_blend: 1.0
+      m: 1.65
+      l_f: 0.13
+      l_r: 0.17
+      angle_offset: 0.0
+      b_f: 2.75
+      b_r: 5.0
+      blend_ratio_lb: 0.001
+      blend_ratio_ub: 0.017
+      c_d: 0.0
+      c_f: 1.45
+      c_m_1: 30
+      c_m_2: 1.25
+      c_r: 1.3
+      d_f: 0.4
+      d_r: 0.3
+      i_com: 0.06
+      steering_limit: 0.6
+      max_throttle: 0.4
+    bounds:
+      use_blend:
+      - 1.0
+      - 1.0
+      m:
+      - 1.6
+      - 1.7
+      l_f:
+      - 0.125
+      - 0.135
+      l_r:
+      - 0.165
+      - 0.175
+      angle_offset:
+      - -0.15
+      - 0.15
+      b_f:
+      - 2.0
+      - 4.0
+      b_r:
+      - 3.0
+      - 10.0
+      blend_ratio_lb:
+      - 0.0001
+      - 0.1
+      blend_ratio_ub:
+      - 0.0001
+      - 0.2
+      c_d:
+      - 0.0
+      - 0.0
+      c_f:
+      - 1.1
+      - 2.0
+      c_m_1:
+      - 10.0
+      - 40.0
+      c_m_2:
+      - 1.0
+      - 1.5
+      c_r:
+      - 0.4
+      - 2.0
+      d_f:
+      - 0.25
+      - 0.6
+      d_r:
+      - 0.15
+      - 0.45
+      i_com:
+      - 0.03
+      - 0.18
+      steering_limit:
+      - 0.4
+      - 0.75
+      max_throttle:
+      - 0.4
+      - 0.6

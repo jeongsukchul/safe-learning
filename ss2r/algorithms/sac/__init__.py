@@ -31,8 +31,6 @@ def get_train_fn(cfg, checkpoint_path, restore_checkpoint_path):
         if k
         not in [
             "render_episodes",
-            "train_domain_randomization",
-            "eval_domain_randomization",
             "render",
             "store_checkpoint",
             "value_privileged",

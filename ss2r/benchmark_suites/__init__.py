@@ -272,25 +272,33 @@ def make_mujoco_playground_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn):
     if action_delay_max is not None:
         train_env = ActionDelayWrapper(train_env, action_delay_max)
 
-    # domain_randomization 함수의 인자 중, cfg 인자 고정
-    randomize_fn = functools.partial(
-        randomization_fns[task_cfg.task_name], cfg=task_cfg.train_params
-    )
-    keys = list(task_cfg.train_params.keys())
-    bounds = jnp.array([task_cfg.train_params[k] for k in keys])
-    train_low, train_high = bounds[:, 0], bounds[:, 1]
-
-    train_env = wrap_for_adv_training(
-        train_env,
-        param_size=len(train_low),
-        dr_range_low=train_low,
-        dr_range_high=train_high,
-        randomization_fn=randomize_fn,
-        episode_length=cfg.training.episode_length,
-        action_repeat=cfg.training.action_repeat,
-        augment_state=False,
-        hard_resets=cfg.training.hard_resets,
-    )
+    if cfg.training.train_domain_randomization:
+        randomize_fn = functools.partial(
+            randomization_fns[task_cfg.task_name], cfg=task_cfg.train_params
+        )
+        keys = list(task_cfg.train_params.keys())
+        bounds = jnp.array([task_cfg.train_params[k] for k in keys])
+        train_low, train_high = bounds[:, 0], bounds[:, 1]
+        train_env = wrap_for_adv_training(
+            train_env,
+            param_size=len(train_low),
+            dr_range_low=train_low,
+            dr_range_high=train_high,
+            randomization_fn=randomize_fn,
+            episode_length=cfg.training.episode_length,
+            action_repeat=cfg.training.action_repeat,
+            augment_state=False,
+            hard_resets=cfg.training.hard_resets,
+        )
+    else:
+        train_env = wrap_for_adv_training(
+            train_env,
+            randomization_fn=None,
+            episode_length=cfg.training.episode_length,
+            action_repeat=cfg.training.action_repeat,
+            augment_state=False,
+            hard_resets=cfg.training.hard_resets,
+        )
     if vision:
         return train_env, train_env
     eval_env = registry.load(task_cfg.task_name, config=task_params)
@@ -298,23 +306,33 @@ def make_mujoco_playground_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn):
     if action_delay_max is not None:
         eval_env = ActionDelayWrapper(eval_env, action_delay_max)
 
-    randomize_fn = functools.partial(
-        randomization_fns[task_cfg.task_name], cfg=task_cfg.eval_params
-    )
-    keys = list(task_cfg.eval_params.keys())
-    bounds = jnp.array([task_cfg.eval_params[k] for k in keys])
-    eval_low, eval_high = bounds[:, 0], bounds[:, 1]
-    eval_env = wrap_for_adv_training(
-        eval_env,
-        param_size=len(eval_low),
-        dr_range_low=eval_low,
-        dr_range_high=eval_high,
-        randomization_fn=randomize_fn,
-        episode_length=cfg.training.episode_length,
-        action_repeat=cfg.training.action_repeat,
-        augment_state=False,
-        hard_resets=cfg.training.hard_resets,
-    )
+    if cfg.training.eval_domain_randomization:
+        randomize_fn = functools.partial(
+            randomization_fns[task_cfg.task_name], cfg=task_cfg.eval_params
+        )
+        keys = list(task_cfg.eval_params.keys())
+        bounds = jnp.array([task_cfg.eval_params[k] for k in keys])
+        eval_low, eval_high = bounds[:, 0], bounds[:, 1]
+        eval_env = wrap_for_adv_training(
+            eval_env,
+            param_size=len(eval_low),
+            dr_range_low=eval_low,
+            dr_range_high=eval_high,
+            randomization_fn=randomize_fn,
+            episode_length=cfg.training.episode_length,
+            action_repeat=cfg.training.action_repeat,
+            augment_state=False,
+            hard_resets=cfg.training.hard_resets,
+        )
+    else:
+        eval_env = wrap_for_adv_training(
+            eval_env,
+            randomization_fn=None,
+            episode_length=cfg.training.episode_length,
+            action_repeat=cfg.training.action_repeat,
+            augment_state=False,
+            hard_resets=cfg.training.hard_resets,
+        )
     return train_env, eval_env, task_cfg
 
 
@@ -336,41 +354,61 @@ def make_safety_gym_envs(cfg, train_wrap_env_fn, eval_wrap_env_fn):
     eval_env = go_to_goal.GoToGoal(**task_cfg.task_params)
     eval_env = eval_wrap_env_fn(eval_env)
 
-    randomize_fn = functools.partial(
-        randomization_fns[task_cfg.task_name], cfg=task_cfg.train_params
-    )
-    keys = list(task_cfg.train_params.keys())
-    bounds = jnp.array([task_cfg.train_params[k] for k in keys])
-    train_low, train_high = bounds[:, 0], bounds[:, 1]
-    train_env = wrap_for_adv_training(
-        train_env,
-        param_size=len(train_low),
-        dr_range_low=train_low,
-        dr_range_high=train_high,
-        randomization_fn=randomize_fn,
-        episode_length=cfg.training.episode_length,
-        action_repeat=cfg.training.action_repeat,
-        augment_state=False,
-        hard_resets=cfg.training.hard_resets,
-    )
+    if cfg.training.train_domain_randomization:
+        randomize_fn = functools.partial(
+            randomization_fns[task_cfg.task_name], cfg=task_cfg.train_params
+        )
+        keys = list(task_cfg.train_params.keys())
+        bounds = jnp.array([task_cfg.train_params[k] for k in keys])
+        train_low, train_high = bounds[:, 0], bounds[:, 1]
+        train_env = wrap_for_adv_training(
+            train_env,
+            param_size=len(train_low),
+            dr_range_low=train_low,
+            dr_range_high=train_high,
+            randomization_fn=randomize_fn,
+            episode_length=cfg.training.episode_length,
+            action_repeat=cfg.training.action_repeat,
+            augment_state=False,
+            hard_resets=cfg.training.hard_resets,
+        )
+    else:
+        train_env = wrap_for_adv_training(
+            train_env,
+            randomization_fn=None,
+            episode_length=cfg.training.episode_length,
+            action_repeat=cfg.training.action_repeat,
+            augment_state=False,
+            hard_resets=cfg.training.hard_resets,
+        )
 
-    randomize_fn = functools.partial(
-        randomization_fns[task_cfg.task_name], cfg=task_cfg.eval_params
-    )
-    keys = list(task_cfg.eval_params.keys())
-    bounds = jnp.array([task_cfg.eval_params[k] for k in keys])
-    eval_low, eval_high = bounds[:, 0], bounds[:, 1]
-    eval_env = wrap_for_adv_training(
-        eval_env,
-        param_size=len(eval_low),
-        dr_range_low=eval_low,
-        dr_range_high=eval_high,
-        randomization_fn=randomize_fn,
-        episode_length=cfg.training.episode_length,
-        action_repeat=cfg.training.action_repeat,
-        augment_state=False,
-        hard_resets=cfg.training.hard_resets,
-    )
+    if cfg.training.eval_domain_randomization:
+        randomize_fn = functools.partial(
+            randomization_fns[task_cfg.task_name], cfg=task_cfg.eval_params
+        )
+        keys = list(task_cfg.eval_params.keys())
+        bounds = jnp.array([task_cfg.eval_params[k] for k in keys])
+        eval_low, eval_high = bounds[:, 0], bounds[:, 1]
+        eval_env = wrap_for_adv_training(
+            eval_env,
+            param_size=len(eval_low),
+            dr_range_low=eval_low,
+            dr_range_high=eval_high,
+            randomization_fn=randomize_fn,
+            episode_length=cfg.training.episode_length,
+            action_repeat=cfg.training.action_repeat,
+            augment_state=False,
+            hard_resets=cfg.training.hard_resets,
+        )
+    else:
+        eval_env = wrap_for_adv_training(
+            eval_env,
+            randomization_fn=None,
+            episode_length=cfg.training.episode_length,
+            action_repeat=cfg.training.action_repeat,
+            augment_state=False,
+            hard_resets=cfg.training.hard_resets,
+        )
     return train_env, eval_env, task_cfg
 
 

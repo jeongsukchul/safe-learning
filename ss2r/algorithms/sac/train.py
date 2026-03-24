@@ -39,7 +39,7 @@ import ss2r.algorithms.sac.losses as sac_losses
 import ss2r.algorithms.sac.networks as sac_networks
 from ss2r.algorithms.penalizers import Penalizer
 from ss2r.algorithms.sac import gradients
-from ss2r.algorithms.sac.data import collect_single_step, collect_adv_single_step
+from ss2r.algorithms.sac.data import collect_adv_single_step
 from ss2r.algorithms.sac.pytree_uniform_sampling_queue import PytreeReplayBufferState
 from ss2r.algorithms.sac.q_transforms import QTransformation, SACBase, SACCost, UCBCost
 from ss2r.algorithms.sac.types import (
@@ -51,7 +51,7 @@ from ss2r.algorithms.sac.types import (
     float16,
     float32,
 )
-from ss2r.rl.evaluation import ConstraintsAdvEvaluator, ConstraintsEvaluator
+from ss2r.rl.evaluation import ConstraintsAdvEvaluator
 from ss2r.rl.utils import (
     dequantize_images,
     quantize_images,
@@ -203,7 +203,9 @@ def train(
     augment_pixels: bool = False,
     load_buffer: bool = False,
     task_cfg = None,
-    nonstationary: bool = False
+    nonstationary: bool = False,
+    train_domain_randomization: bool = True,
+    eval_domain_randomization: bool = True,
 ):
     if min_replay_size >= num_timesteps:
         raise ValueError(
@@ -559,6 +561,8 @@ def train(
         )  # type: ignore
         return (new_training_state, new_buffer_state, key, count + 1), metrics
 
+    experience_fn = get_experience_fn
+
     def run_experience_step(
         training_state: TrainingState,
         env_state: envs.State,
@@ -566,12 +570,23 @@ def train(
         key: PRNGKey,
     ) -> Tuple[TrainingState, envs.State, ReplayBufferState, PRNGKey]:
         """Runs the non-jittable experience collection step."""
-        experience_key, training_key, dr_key = jax.random.split(key,3)
-        dynamics_params = jax.random.uniform(key=dr_key, shape=(num_envs//jax.process_count(),len(train_low)), minval=train_low, maxval=train_high)
-        if not nonstationary:
-            print("staitonary!")
-            dynamics_params = env_state.info["dr_params"] * (1 - env_state.done[..., None]) + dynamics_params * env_state.done[..., None]
-        normalizer_params, env_state, buffer_state = get_experience_fn(
+        if train_domain_randomization:
+            experience_key, training_key, dr_key = jax.random.split(key, 3)
+            dynamics_params = jax.random.uniform(
+                key=dr_key,
+                shape=(num_envs // jax.process_count(), len(train_low)),
+                minval=train_low,
+                maxval=train_high,
+            )
+            if not nonstationary:
+                dynamics_params = (
+                    env_state.info["dr_params"] * (1 - env_state.done[..., None])
+                    + dynamics_params * env_state.done[..., None]
+                )
+        else:
+            experience_key, training_key = jax.random.split(key, 2)
+            dynamics_params = None
+        normalizer_params, env_state, buffer_state = experience_fn(
             env,
             make_policy,
             training_state.policy_params,
@@ -629,9 +644,18 @@ def train(
         def f(carry, unused):
             del unused
             training_state, env_state, buffer_state, key = carry
-            key, new_key, dr_key = jax.random.split(key,3)
-            dynamics_params = jax.random.uniform(key=dr_key, shape=(num_envs//jax.process_count(),len(train_low)), minval=train_low, maxval=train_high)
-            new_normalizer_params, env_state, buffer_state = get_experience_fn(
+            if train_domain_randomization:
+                key, new_key, dr_key = jax.random.split(key, 3)
+                dynamics_params = jax.random.uniform(
+                    key=dr_key,
+                    shape=(num_envs // jax.process_count(), len(train_low)),
+                    minval=train_low,
+                    maxval=train_high,
+                )
+            else:
+                key, new_key = jax.random.split(key, 2)
+                dynamics_params = None
+            new_normalizer_params, env_state, buffer_state = experience_fn(
                 env,
                 make_policy,
                 training_state.policy_params,
@@ -732,8 +756,15 @@ def train(
     # Run initial eval
     metrics = {}
     if num_evals > 1:
-        dynamics_params_grid = jax.random.uniform(eval_key, shape=(num_eval_envs, \
-                                    len(train_low)), minval=train_low, maxval=train_high)
+        if eval_domain_randomization:
+            dynamics_params_grid = jax.random.uniform(
+                eval_key,
+                shape=(num_eval_envs, len(train_low)),
+                minval=train_low,
+                maxval=train_high,
+            )
+        else:
+            dynamics_params_grid = None
         metrics = evaluator.run_evaluation(
             (training_state.normalizer_params, training_state.policy_params),
             dynamics_params=dynamics_params_grid,
@@ -794,8 +825,15 @@ def train(
             checkpoint.save(checkpoint_logdir, current_step, params, dummy_ckpt_config)
 
         # Run evals.
-        dynamics_params_grid = jax.random.uniform(eval_key, shape=(num_eval_envs, \
-                                    len(train_low)), minval=train_low, maxval=train_high)
+        if eval_domain_randomization:
+            dynamics_params_grid = jax.random.uniform(
+                eval_key,
+                shape=(num_eval_envs, len(train_low)),
+                minval=train_low,
+                maxval=train_high,
+            )
+        else:
+            dynamics_params_grid = None
         metrics = evaluator.run_evaluation(
             (training_state.normalizer_params, training_state.policy_params),
             dynamics_params=dynamics_params_grid,

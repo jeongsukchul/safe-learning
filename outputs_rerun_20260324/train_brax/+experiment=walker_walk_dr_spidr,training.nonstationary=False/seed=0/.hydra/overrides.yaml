@@ -1,0 +1,3 @@
+- +experiment=walker_walk_dr_spidr
+- training.nonstationary=False
+- log_dir=outputs_rerun_20260324
