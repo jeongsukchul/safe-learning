@@ -2,7 +2,6 @@
 defaults:
   - g1_joystick
   - override /agent/penalizer: lagrangian
-  - override /agent/cost_robustness: ucb_cost
   - _self_
 
 training:

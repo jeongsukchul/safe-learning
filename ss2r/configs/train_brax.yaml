@@ -43,7 +43,7 @@ training:
   num_eval_envs: 128
   num_eval_episodes: 10
   action_repeat: 1
-  render: true
+  render: false
   num_timesteps: 1000000
   value_privileged: true
   policy_privileged: false

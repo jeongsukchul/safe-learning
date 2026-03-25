@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../RL/safe-learning_default"
+		}
+	],
+	"settings": {}
+}

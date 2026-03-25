@@ -380,36 +380,43 @@ class ConstraintsAdvEvaluator(Evaluator):
             # eval_metrics = eval_state.info['eval_metrics']
             return carry, eval_state
         _, eval_state = jax.lax.scan(f, None, unroll_key)
-        # shape: [num_episodes, num_eval_envs]
-        cost_by_episode = np.asarray(eval_state.info["eval_metrics"].episode_metrics["cost"])
-        param_cost_mean = cost_by_episode.mean(axis=0)
-        param_cost_std = cost_by_episode.std(axis=0)
-        eval_state.info["eval_metrics"].episode_metrics["cost"] = param_cost_mean
-        safe = np.where(param_cost_mean < self.budget, 1.0, 0.0)
-        eval_state.info["eval_metrics"].episode_metrics["safe"] = safe
+
         eval_metrics = eval_state.info["eval_metrics"]
         eval_metrics.active_episodes.block_until_ready()
         epoch_eval_time = time.time() - t
-        metrics = {}
-        for fn in [np.mean, np.std]:
-            suffix = "_std" if fn == np.std else ""
-            metrics.update(
-                {
-                    f"{prefix}/episode_{name}{suffix}": (
-                        fn(value) if aggregate_episodes else value  # type: ignore
-                    )
-                    for name, value in eval_metrics.episode_metrics.items()
-                }
+        metrics: dict[str, float] = {}
+
+        # Reward samples across all eval episodes/envs.
+        reward_by_episode = np.asarray(eval_metrics.episode_metrics["reward"])
+        reward_samples = reward_by_episode.reshape(-1)
+        reward_samples = reward_samples[np.isfinite(reward_samples)]
+
+        if reward_samples.size > 0:
+            metrics[f"{prefix}/episode_reward/min"] = float(np.min(reward_samples))
+            metrics[f"{prefix}/episode_reward/max"] = float(np.max(reward_samples))
+            metrics[f"{prefix}/episode_reward/mean"] = float(np.mean(reward_samples))
+            metrics[f"{prefix}/episode_reward/std"] = float(np.std(reward_samples))
+
+            for p in (10, 20, 30, 40, 50, 60, 70, 80, 90):
+                metrics[f"{prefix}/episode_reward/p{p}"] = float(
+                    np.percentile(reward_samples, p)
+                )
+
+            sorted_rewards = np.sort(reward_samples)
+            n = int(sorted_rewards.size)
+            lo = int(np.floor(0.25 * n))
+            hi = int(np.ceil(0.75 * n))
+            mid = sorted_rewards[lo:hi] if hi > lo else sorted_rewards
+            metrics[f"{prefix}/episode_reward/iqm"] = float(np.mean(mid))
+
+            tail_n = max(1, int(np.ceil(0.10 * n)))
+            metrics[f"{prefix}/episode_reward/cvar10"] = float(
+                np.mean(sorted_rewards[:tail_n])
             )
-        metrics[f"{prefix}/avg_episode_length"] = np.mean(eval_metrics.episode_steps)
-        metrics[f"{prefix}/epoch_eval_time"] = epoch_eval_time
-        metrics[f"{prefix}/sps"] = self._steps_per_unroll / epoch_eval_time
-        metrics[f"{prefix}/param_cost_mean"] = float(np.mean(param_cost_mean))
-        metrics[f"{prefix}/param_cost_std"] = float(np.std(param_cost_mean))
-        metrics[f"{prefix}/param_cost_min"] = float(np.min(param_cost_mean))
-        for i, (mean_v, std_v) in enumerate(zip(param_cost_mean, param_cost_std)):
-            metrics[f"{prefix}/param_cost/param_{i}/mean"] = float(mean_v)
-            metrics[f"{prefix}/param_cost/param_{i}/std"] = float(std_v)
+
+        metrics[f"{prefix}/avg_episode_length"] = float(np.mean(eval_metrics.episode_steps))
+        metrics[f"{prefix}/epoch_eval_time"] = float(epoch_eval_time)
+        metrics[f"{prefix}/sps"] = float(self._steps_per_unroll / epoch_eval_time)
         self._eval_walltime = self._eval_walltime + epoch_eval_time
         metrics = {
             f"{prefix}/walltime": self._eval_walltime,
