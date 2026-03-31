@@ -74,6 +74,7 @@ def domain_randomization(cfg, sys, params=None, rng: jax.Array = None):
 
         # 기어: 좌우 대칭으로 hip_x/y/z, knee 오프셋을 _name_to_id 인덱스에 반영
         gear_sample = sys.actuator_gear.copy()
+        # print(f'gear_sample : {gear_sample.shape}')
         name_values = {
             "right_hip_x": gear_hip_x,
             "left_hip_x": gear_hip_x,
@@ -86,13 +87,16 @@ def domain_randomization(cfg, sys, params=None, rng: jax.Array = None):
         }
         for name, gear_amount in name_values.items():
             actuator_id = _name_to_id[name]
-            gear_sample = gear_sample.at[actuator_id, 0].add(gear_amount)
+            # gear_sample = gear_sample.at[actuator_id, 0].add(gear_amount)
+            gear_sample = gear_sample.at[actuator_id].add(gear_amount)
+
 
         return friction_sample, gear_sample
 
     # ---- params 전용: 주어진 벡터를 그대로 적용 (cartpole의 shift_dynamics) ----
     def shift_dynamics(params_vec):
         # params_vec shape: (5,) 또는 배치 시 (B, 5)
+        print(f'params_vec : {params_vec},@@@@@@@@@@@@@@')
         friction_sample, gear_sample = _apply_params(params_vec)
         return friction_sample, gear_sample
 
@@ -104,6 +108,7 @@ def domain_randomization(cfg, sys, params=None, rng: jax.Array = None):
 
     # ---- 분기: params / rng 둘 중 하나만 받음 (cartpole과 동일) ----
     if rng is None and params is not None:
+        print(f'params : {params}')
         friction_sample, gear_sample = shift_dynamics(params)
     elif rng is not None and params is None:
         friction_sample, gear_sample, packed = rand_dynamics(rng)

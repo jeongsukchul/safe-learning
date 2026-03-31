@@ -26,6 +26,8 @@ writers:
   - stderr
 
 wandb:
+  project : null
+  resume : never
   group: null
   notes: null
   name: ${hydra:job.override_dirname}
@@ -39,8 +41,8 @@ training:
   seed: 0
   num_evals: 15
   episode_length: 1000
-  num_envs: 2048
-  num_eval_envs: 128
+  num_envs: 1024
+  num_eval_envs: 1024
   num_eval_episodes: 10
   action_repeat: 1
   render: false

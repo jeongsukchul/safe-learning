@@ -1,5 +1,5 @@
 training:
-  num_envs: 128
+  num_envs: 1024
 
 agent:
   batch_size: 512

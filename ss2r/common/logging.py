@@ -150,11 +150,13 @@ class WeightAndBiasesWriter:
         config.wandb.name = name
         config_dict = omegaconf.OmegaConf.to_container(config, resolve=True)
         assert isinstance(config_dict, dict)
+        wandb_kwargs = omegaconf.OmegaConf.to_container(config.wandb, resolve=True)
+        assert isinstance(wandb_kwargs, dict)
+        if "resume" not in wandb_kwargs:
+            wandb_kwargs["resume"] = "never"
         wandb.init(
-            project="ss2r",
-            resume=True,
             config=config_dict,
-            **config.wandb,
+            **wandb_kwargs,
         )
         self._handle = wandb
 
