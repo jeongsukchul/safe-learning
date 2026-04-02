@@ -33,11 +33,11 @@ _EXTENTS = (-2.0, -2.0, 2.0, 2.0)
 _ROBOT_ID = 1
 
 
-def default_config() -> config_dict.ConfigDict:
-    return config_dict.create(
-        ctrl_dt=0.02,
-        sim_dt=0.01,
-    )
+# def default_config() -> config_dict.ConfigDict:
+#     return config_dict.create(
+#         ctrl_dt=0.02,
+#         sim_dt=0.01,
+#     )
 
 
 def domain_randomization(cfg, sys, params=None, rng: jax.Array = None):
@@ -220,9 +220,9 @@ class GoToGoal(mjx_env.MjxEnv):
         num_hazards: int = 10,
         num_vases: int = 10,
         goal_size: float = 0.3,
-        config: config_dict.ConfigDict = default_config(),
+        # config: config_dict.ConfigDict = default_config(),
     ):
-        super().__init__(config)
+        # super().__init__(config)
         self.goal_size = goal_size
         self._xml_path = _XML_PATH.as_posix()
         self.spec = {
@@ -237,7 +237,7 @@ class GoToGoal(mjx_env.MjxEnv):
             mj_spec, layout=layout, visualize=visualize_lidar, goal_size=goal_size
         )
         self._mj_model = mj_spec.compile()
-        self._mj_model.opt.timestep = self.sim_dt
+        # self._mj_model.opt.timestep = self.sim_dt
         self._mjx_model = mjx.put_model(self._mj_model)
         self._post_init()
 

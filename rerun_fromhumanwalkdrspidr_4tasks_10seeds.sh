@@ -105,7 +105,8 @@ else
     # humanoid_walk_dr_spidr stationary, then nonstationary; then remaining tasks (full 4-way each).
     # run_case_multiseed "humanoid_walk_dr_spidr" "false"
     # run_case_multiseed "humanoid_walk_dr_spidr" "true"
-    run_task cartpole_swingup_dr cartpole_swingup_dr_spidr
+    # run_task cartpole_swingup_dr cartpole_swingup_dr_spidr
+    run_task humanoid_walk_dr humanoid_walk_dr_spidr
     run_task go_to_goal_dr go_to_goal_dr_spidr
   fi
 fi
